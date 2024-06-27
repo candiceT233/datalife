@@ -103,7 +103,7 @@ void TrackFile::open() {
 }
 
 ssize_t TrackFile::read(void *buf, size_t count, uint32_t index) {
-  DPRINTF("In trackfile read count %u \n", count);
+  DPRINTF("In trackfile read count %u \n", count); // read start time
   auto read_file_start_time = high_resolution_clock::now();
   unixread_t unixRead = (unixread_t)dlsym(RTLD_NEXT, "read");
   auto bytes_read = (*unixRead)(_fd_orig, buf, count);
@@ -157,12 +157,12 @@ ssize_t TrackFile::read(void *buf, size_t count, uint32_t index) {
 #ifdef WRITE_STAT_EACH
   close();
 #endif
-  return bytes_read;
+  return bytes_read; // // read end time
   //  return 0;
 }
 
 ssize_t TrackFile::write(const void *buf, size_t count, uint32_t index) {
-  DPRINTF("In trackfile write count %u \n", count);
+  DPRINTF("In trackfile write count %u \n", count); // read start time
   auto write_file_start_time = high_resolution_clock::now();
   unixwrite_t unixWrite = (unixwrite_t)dlsym(RTLD_NEXT, "write");
   DPRINTF("About to write %u count to file with fd %d and file_name: %s\n", 
@@ -215,7 +215,7 @@ ssize_t TrackFile::write(const void *buf, size_t count, uint32_t index) {
     _filePos[index] += bytes_written;
     // _fileSize += bytes_written;  
   }
-  return bytes_written;
+  return bytes_written; // read end time
 }
 
 int TrackFile::vfprintf(unsigned int pos, int count) {

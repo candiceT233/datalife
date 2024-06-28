@@ -3,7 +3,7 @@
 #*BeginPNNLCopyright*********************************************************
 #
 # $HeadURL$
-# $Id: b3a9434b0207745daf99726c43f05688ac1e068f $
+# $Id$
 #
 #***********************************************************EndPNNLCopyright*
 
@@ -33,6 +33,15 @@ else()
     set(INPUT_DIR_PATH ".")
 endif()
 
+# Compiling Mode
+# Set a default build type if none was specified
+set(default_build_type "Release")
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message("IN DEBUG MODE")
+    add_compile_definitions(LIBDEBUG)
+else()
+    message("IN RELEASE MODE")
+endif()
 
 #****************************************************************************
 # 

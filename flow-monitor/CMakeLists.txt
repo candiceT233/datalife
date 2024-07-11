@@ -54,6 +54,10 @@ option(BLK_IDX "Block Index" OFF)
 if(BLK_IDX)
     add_compile_definitions(BLK_IDX)
 endif()
+option(INT_DOT "Intercept .dot files" OFF)
+if(INT_DOT)
+    add_compile_definitions(INT_DOT)
+endif()
 
 #****************************************************************************
 # 

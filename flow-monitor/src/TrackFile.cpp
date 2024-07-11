@@ -31,12 +31,18 @@
 #include <chrono>
 
 using namespace std::chrono;
-//#define DPRINTF(...) fprintf(stderr, __VA_ARGS__)
+#ifdef LIBDEBUG
+#define DPRINTF(...) fprintf(stderr, __VA_ARGS__)
+#else
 #define DPRINTF(...)
+#endif
 
-#define GATHERSTAT 1
-// #define USE_HASH 1
-#define ENABLE_TRACE 1
+#ifdef BLK_IDX
+#define BLK_SIZE 4096 // 4KB 8KB
+#endif
+// #define GATHERSTAT 1
+#define USE_HASH 1
+// #define ENABLE_TRACE 1
 // #define WRITE_STAT_EACH 1
 
 
@@ -48,6 +54,7 @@ TrackFile::TrackFile(std::string name, int fd, bool openFile) :
   _filename(name),
   total_time_spent_read(0),
   total_time_spent_write(0)
+
 { 
   DPRINTF("In Trackfile constructor openfile bool: %d\n", openFile);
   _blkSize = Config::blockSizeForStat;
@@ -64,6 +71,15 @@ void TrackFile::open() {
   DPRINTF("[MONITOR] TrackFile open: %s\n", _name.c_str()) ;
   // #if 0
   // _closed = false;
+
+#ifdef BLK_IDX
+  // trace_read_blk_order.emplace(_name, std::vector<TraceData>());
+  // trace_write_blk_order.emplace(_name, std::vector<TraceData>());
+  trace_read_blk_order.emplace(_name, TraceData());
+  trace_write_blk_order.emplace(_name, TraceData());
+#endif
+
+#ifdef GATHERSTAT
   if (track_file_blk_r_stat.find(_name) == track_file_blk_r_stat.end()) {
     track_file_blk_r_stat.insert(std::make_pair(_name, 
 						std::map<int, 
@@ -86,7 +102,6 @@ void TrackFile::open() {
 						std::atomic<int64_t> >()));
   }
 
-
   if (trace_read_blk_seq.find(_name) == trace_read_blk_seq.end()) {
     trace_read_blk_seq.insert(std::make_pair(_name, std::vector<int>()));
   }
@@ -94,6 +109,7 @@ void TrackFile::open() {
   if (trace_write_blk_seq.find(_name) == trace_write_blk_seq.end()) {
     trace_write_blk_seq.insert(std::make_pair(_name, std::vector<int>()));
   }
+#endif
 
   open_file_start_time = high_resolution_clock::now();
 
@@ -111,6 +127,18 @@ ssize_t TrackFile::read(void *buf, size_t count, uint32_t index) {
   auto duration = duration_cast<seconds>(read_file_end_time - read_file_start_time); 
   total_time_spent_read += duration;
   // DPRINTF("bytes_read: %ld _fd_orig: %d _name: %s \n", bytes_read, _fd_orig, _name.c_str());
+
+#ifdef BLK_IDX
+    auto start_block = _filePos[index] / BLK_SIZE;
+    auto end_block = (_filePos[index] + count) / BLK_SIZE;
+    // TraceData block_range = std::make_tuple(start_block, end_block);
+    // auto& trace_vector = trace_read_blk_order[_name];
+    // trace_vector.emplace_back(block_range);
+    auto& trace_vector = trace_read_blk_order[_name];
+    trace_vector.push_back(start_block);
+    trace_vector.push_back(end_block);
+#endif
+
 #ifdef GATHERSTAT
   if (bytes_read != -1) { // Only update stats if nonzero byte counts are read
     auto blockSizeForStat = Config::blockSizeForStat;
@@ -172,6 +200,18 @@ ssize_t TrackFile::write(const void *buf, size_t count, uint32_t index) {
   auto write_file_end_time = high_resolution_clock::now();
   auto duration = duration_cast<seconds>(write_file_end_time - write_file_start_time);
   total_time_spent_write += duration;
+
+#ifdef BLK_IDX
+    auto start_block = _filePos[index] / BLK_SIZE;
+    auto end_block = (_filePos[index] + count) / BLK_SIZE;
+    // TraceData block_range = std::make_tuple(start_block, end_block);
+    // auto& trace_vector = trace_write_blk_order[_name];
+    // trace_vector.emplace_back(block_range);
+    auto& trace_vector = trace_write_blk_order[_name];
+    trace_vector.push_back(start_block);
+    trace_vector.push_back(end_block);
+#endif
+
 #ifdef GATHERSTAT
   if (bytes_written != -1) {
     auto diff = _filePos[index]; //  - _filePos[0];
@@ -219,7 +259,7 @@ ssize_t TrackFile::write(const void *buf, size_t count, uint32_t index) {
 }
 
 int TrackFile::vfprintf(unsigned int pos, int count) {
-  // DPRINTF("In trackfile vfprintf\n");
+  DPRINTF("In trackfile vfprintf\n");
 #ifdef GATHERSTAT
   if (count != -1) {
     auto diff = _filePos[pos]; //  - _filePos[0];
@@ -287,6 +327,30 @@ off_t TrackFile::seek(off_t offset, int whence, uint32_t index) {
   return  offset_loc; 
 }
 
+// Function to write trace data to file including access pattern (sequential or random)
+void write_trace_data(const std::string& filename, TraceData& blk_trace_info, const std::string& pid) {
+    if (blk_trace_info.empty()) {
+        return;  // Do nothing if blk_trace_info is empty
+    }
+
+    std::ostringstream oss;
+
+    // Write block ranges and clear the vector
+    for (size_t i = 0; i < blk_trace_info.size(); i += 2) {
+        oss << blk_trace_info[i] << " " << blk_trace_info[i + 1] << "\n";
+    }
+    blk_trace_info.clear(); // Clear the vector after writing
+
+    // Write the contents of the string stream to the file at once
+    std::ofstream file(filename, std::ios::out | std::ios::app);
+    if (!file) {
+        std::cerr << "File for trace stat collection not created!" << std::endl;
+        return;
+    }
+    file << oss.str();
+    file.close();
+}
+
 
 void TrackFile::close() {
   // #if 0  
@@ -304,6 +368,26 @@ void TrackFile::close() {
   
   close_file_end_time = high_resolution_clock::now();
   auto elapsed_time = duration_cast<seconds>(close_file_end_time - open_file_start_time);
+
+
+#ifdef BLK_IDX
+    DPRINTF("Writing r blk access order stat\n");
+    std::string file_name_trace_r = _filename + "_" + pid + "_r_blk_trace";
+    auto& blk_trace_info_r = trace_read_blk_order[_filename];
+    auto future_r = std::async(std::launch::async, write_trace_data, file_name_trace_r, std::ref(blk_trace_info_r), pid);
+
+    DPRINTF("Writing w blk access order stat\n");
+    std::string file_name_trace_w = _filename + "_" + pid + "_w_blk_trace";
+    auto& blk_trace_info_w = trace_write_blk_order[_filename];
+    auto future_w = std::async(std::launch::async, write_trace_data, file_name_trace_w, std::ref(blk_trace_info_w), pid);
+
+    // Wait for both async tasks to complete
+    future_r.get();
+    future_w.get();
+#endif
+
+
+#ifdef GATHERSTAT
    // write blk access stat in a file
   DPRINTF("Writing r blk access stat\n");
   std::fstream current_file_stat_r;
@@ -386,4 +470,5 @@ void TrackFile::close() {
     current_file_trace_w << blk_ << std::endl;
   }
   // #endif
+  #endif
 }

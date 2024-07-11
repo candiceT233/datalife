@@ -38,9 +38,21 @@ endif()
 set(default_build_type "Release")
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     message("IN DEBUG MODE")
+    add_compile_options(-g -O0)
     add_compile_definitions(LIBDEBUG)
 else()
     message("IN RELEASE MODE")
+    add_compile_options(-g -O3)
+endif()
+
+# Datalife Options
+option(GATHERSTAT "Gather statistics" OFF)
+if(GATHERSTAT)
+    add_compile_definitions(GATHERSTAT)
+endif()
+option(BLK_IDX "Block Index" OFF)
+if(BLK_IDX)
+    add_compile_definitions(BLK_IDX)
 endif()
 
 #****************************************************************************

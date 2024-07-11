@@ -73,6 +73,7 @@ public:
   }
 };
 
+
 void __attribute__((constructor)) monitorInit(void) {
     std::call_once(log_flag, []() {
         timer = new Timer();
@@ -159,7 +160,7 @@ void __attribute__((constructor)) monitorInit(void) {
 }
 
 void __attribute__((destructor)) monitorCleanup(void) {
-    static CleanupTrackFile aCleanupTrackFile; 
+    // static CleanupTrackFile aCleanupTrackFile; // candice: need to enable for SRA Search
     timer->start();
     init = false; //set to false because we cant ensure our static members have not already been deleted.
 
@@ -178,15 +179,14 @@ void __attribute__((destructor)) monitorCleanup(void) {
         }
         delete track_files;
     }
-
-    timer->end(Timer::MetricType::monitor, Timer::Metric::destructor);
+    
     //delete InputFile::_cache; //desturctor time tracked by each cache...
     //delete InputFile::_decompressionPool;
     //delete InputFile::_transferPool;
     //delete OutputFile::_decompressionPool;
     //delete OutputFile::_transferPool;
     //delete LocalFile::_cache; //desturctor time tracked by each cache...
-    timer->start();
+
     FileCacheRegister::closeFileCacheRegister();
     ConnectionPool::removeAllConnectionPools();
     Connection::closeAllConnections();
@@ -232,6 +232,9 @@ int trackFileOpen(std::string name, std::string metaName, MonitorFile::Type type
 /*Posix******************************************************************************************************/
 
 int monitorOpen(std::string name, std::string metaName, MonitorFile::Type type, const char *pathname, int flags, int mode) {
+#ifdef LIBDEBUG
+  DPRINTF("In monitor open \n");
+#endif
   auto fd = (*unixopen64)(metaName.c_str(), O_RDONLY, 0);
   MonitorFile *file = MonitorFile::addNewMonitorFile(type, name, metaName, fd);
   if (file) {
@@ -264,17 +267,19 @@ int open(const char *pathname, int flags, ...) {
   patterns.push_back("*.tar.gz");
   patterns.push_back("*.txt");
   patterns.push_back("*.lht");
-  patterns.push_back("*.fasta.amb");
-  patterns.push_back("*.fasta.sa");
-  patterns.push_back("*.fasta.bwt");
-  patterns.push_back("*.fasta.pac");
-  patterns.push_back("*.fasta.ann");
-  patterns.push_back("*.fasta");
+  patterns.push_back("*.out");
+  patterns.push_back("*.stf");
+  // patterns.push_back("*.fasta.amb");
+  // patterns.push_back("*.fasta.sa");
+  // patterns.push_back("*.fasta.bwt");
+  // patterns.push_back("*.fasta.pac");
+  // patterns.push_back("*.fasta.ann");
+  // patterns.push_back("*.fasta");
   for (auto pattern: patterns) {
     auto ret_val = fnmatch(pattern.c_str(), pathname, 0);
     if (ret_val == 0) {
 #ifdef LIBDEBUG
-      DPRINTF("Firing off trackfileopen for %s \n ", pathname);
+      DPRINTF("Firing off trackFileOpen for %s \n ", pathname);
 #endif
       return outerWrapper("open", pathname, metric, trackFileOpen, unixopen, 
 			  pathname, flags, mode);
@@ -294,30 +299,33 @@ int open64(const char *pathname, int flags, ...) {
     Timer::Metric metric = (flags & O_WRONLY || flags & O_RDWR) ? Timer::Metric::out_open : Timer::Metric::in_open;
 
     std::vector<std::string> patterns;
-    patterns.push_back("*.h5");
-    patterns.push_back("*.vcf");
     patterns.push_back("*.tar.gz");
     patterns.push_back("*.txt");
     patterns.push_back("*.lht");
-    patterns.push_back("*.stf");
     patterns.push_back("*.out");
-    patterns.push_back("*.fasta.amb");
-    patterns.push_back("*.fasta.sa");
-    patterns.push_back("*.fasta.bwt");
-    patterns.push_back("*.fasta.pac");
-    patterns.push_back("*.fasta.ann");
-    patterns.push_back("*.fasta");
+patterns.push_back("*.stf");
+    // patterns.push_back("*.h5");
+    // patterns.push_back("*.vcf");
+    // patterns.push_back("*.out");
+patterns.push_back("*.stf");
+    // patterns.push_back("*.fasta.amb");
+    // patterns.push_back("*.fasta.sa");
+    // patterns.push_back("*.fasta.bwt");
+    // patterns.push_back("*.fasta.pac");
+    // patterns.push_back("*.fasta.ann");
+    // patterns.push_back("*.fasta");
 
     for (auto pattern: patterns) {
         auto ret_val = fnmatch(pattern.c_str(), pathname, 0);
         if (ret_val == 0) {
 #ifdef LIBDEBUG
-            DPRINTF("Firing off trackfileopen for %s \n ", pathname);
+            DPRINTF("Firing off trackFileOpen[64] for %s \n ", pathname);
 #endif
             return outerWrapper("open", pathname, metric, trackFileOpen, unixopen64, 
 			    pathname, flags, mode);
         }
     }
+
 #ifdef LIBDEBUG
     DPRINTF("Open64 %s: \n", pathname);
 #endif
@@ -380,7 +388,7 @@ int openat(int dirfd, const char *pathname, int flags, ...) {
     auto ret_val = fnmatch(pattern.c_str(), pathname, 0);
     if (ret_val == 0) {
 #ifdef LIBDEBUG
-      DPRINTF("Firing off trackfileopen for %s \n ", pathname);
+      DPRINTF("Firing off trackFileOpenat for %s \n ", pathname);
 #endif
       return outerWrapper("openat", pathname, metric, trackFileOpenat, unixopenat, 
 			  dirfd, pathname, flags, mode);
@@ -395,22 +403,27 @@ int monitorClose(MonitorFile *file, unsigned int fp, int fd) {
 #ifdef LIBDEBUG
   DPRINTF("In monitor close \n");
 #endif
+
+// candice commented out
 #ifdef TRACKFILECHANGES
   std::vector<std::string> patterns;
-  patterns.push_back("*.fits");
-  patterns.push_back("*.h5");
-  patterns.push_back("*.vcf");
-  patterns.push_back("*.*.bt2");
-  patterns.push_back("*.fna");
-  patterns.push_back("*.tar.gz");
   patterns.push_back("*.txt");
   patterns.push_back("*.lht");
-    patterns.push_back("*.fasta.amb");
-    patterns.push_back("*.fasta.sa");
-    patterns.push_back("*.fasta.bwt");
-    patterns.push_back("*.fasta.pac");
-    patterns.push_back("*.fasta.ann");
-    patterns.push_back("*.fasta");
+  patterns.push_back("*.out");
+patterns.push_back("*.stf");
+  patterns.push_back("*.tar.gz");
+  patterns.push_back("*.fits");
+  // patterns.push_back("*.h5");
+  // patterns.push_back("*.vcf");
+  // patterns.push_back("*.*.bt2");
+  // patterns.push_back("*.fna");
+  // patterns.push_back("*.fasta.amb");
+  // patterns.push_back("*.fasta.sa");
+  // patterns.push_back("*.fasta.bwt");
+  // patterns.push_back("*.fasta.pac");
+  // patterns.push_back("*.fasta.ann");
+  // patterns.push_back("*.fasta");
+
 
   for (auto pattern: patterns) {
     auto ret_val = fnmatch(pattern.c_str(), file->name().c_str(), 0);
@@ -423,15 +436,15 @@ int monitorClose(MonitorFile *file, unsigned int fp, int fd) {
     }
   }
 #endif
+
     MonitorFile::removeMonitorFile(file);
     MonitorFileDescriptor::removeMonitorFileDescriptor(fd);
-    //
-// #ifdef TRACKFILECHANGES
-//     return 0;
-// #else
     
+#ifdef TRACKFILECHANGES
+    return 0;
+#else
     return (*unixclose)(fd);
-// #endif
+#endif
 }
 
 int close(int fd) {
@@ -485,9 +498,19 @@ void exit_group(int status) {
 #endif
 
 ssize_t monitorRead(MonitorFile *file, unsigned int fp, int fd, void *buf, size_t count) {
+#ifdef LIBDEBUG
+    DPRINTF("In Monitor read\n");
+#endif
+  
   ssize_t ret = file->read(buf, count, fp);
-  timer->addAmt(Timer::MetricType::monitor, Timer::Metric::read, ret); // candice: removed 
+  timer->addAmt(Timer::MetricType::monitor, Timer::Metric::read, ret); // candice: removed
+  // DPRINTF("In Monitor read count %ld\n", count);
+  // DPRINTF("In Monitor read ret %ld\n", ret);
+  // timer->addAmt(Timer::MetricType::monitor, Timer::Metric::read, count); // candice: removed 
   return ret;
+#ifdef LIBDEBUG
+    DPRINTF("Returning from Monitor read\n");
+#endif
 }
 
 ssize_t read(int fd, void *buf, size_t count) {
@@ -506,6 +529,9 @@ ssize_t monitorWrite(MonitorFile *file, unsigned int fp, int fd, const void *buf
 #endif
     auto ret = file->write(buf, count, fp);
     timer->addAmt(Timer::MetricType::monitor, Timer::Metric::write, ret); // candice: removed
+    // DPRINTF("In Monitor write count %ld\n", count);
+    // DPRINTF("In Monitor write ret %ld\n", ret);
+    // timer->addAmt(Timer::MetricType::monitor, Timer::Metric::write, count); // candice: removed
 #ifdef LIBDEBUG
     DPRINTF("Returning from Monitor write\n");
 #endif
@@ -514,9 +540,9 @@ ssize_t monitorWrite(MonitorFile *file, unsigned int fp, int fd, const void *buf
 
 ssize_t write(int fd, const void *buf, size_t count) {
     vLock.readerLock();
-#ifdef LIBDEBUG
-    DPRINTF("Printing fd in write %d and count %u\n", fd, count);
-#endif
+// #ifdef LIBDEBUG
+//     DPRINTF("Printing fd in write %d and count %u\n", fd, count);
+// #endif
     auto ret = outerWrapper("write", fd, Timer::Metric::write, monitorWrite, unixwrite, fd, buf, count);
     vLock.readerUnlock();
     return ret;
@@ -549,7 +575,12 @@ int innerStat(int version, const char *filename, struct stat64 *buf) { return wh
 
 template <typename T>
 int monitorStat(std::string name, std::string metaName, MonitorFile::Type type, int version, const char *filename, T *buf) {
+#ifdef LIBDEBUG
+  DPRINTF("In monitor stat \n");
+#endif
   auto ret = innerStat(_STAT_VER, metaName.c_str(), buf);
+
+  
   MonitorFile *file = MonitorFile::lookUpMonitorFile(filename);
   if (file)
     buf->st_size = (off_t)file->fileSize();
@@ -576,9 +607,9 @@ int monitorStat(std::string name, std::string metaName, MonitorFile::Type type, 
 	buf->st_size = tempFile.fileSize();
       }
     }*/
-
     (*unixclose)(fd);
   }
+
   return ret;
 }
 
@@ -684,17 +715,20 @@ FILE *fopen(const char *__restrict fileName, const char *__restrict modes) {
 
   std::vector<std::string> patterns;
   patterns.push_back("*.fits");
-  patterns.push_back("*.*.bt2");
-  patterns.push_back("*.fna");
-  patterns.push_back("*.fastq");
   patterns.push_back("*.lht");
+  patterns.push_back("*.out");
+patterns.push_back("*.stf");
   patterns.push_back("*.tar.gz");
-    patterns.push_back("*.fasta.amb");
-    patterns.push_back("*.fasta.sa");
-    patterns.push_back("*.fasta.bwt");
-    patterns.push_back("*.fasta.pac");
-    patterns.push_back("*.fasta.ann");
-    patterns.push_back("*.fasta");
+  patterns.push_back("*.txt");
+  // patterns.push_back("*.*.bt2");
+  // patterns.push_back("*.fna");
+  // patterns.push_back("*.fastq");
+    // patterns.push_back("*.fasta.amb");
+    // patterns.push_back("*.fasta.sa");
+    // patterns.push_back("*.fasta.bwt");
+    // patterns.push_back("*.fasta.pac");
+    // patterns.push_back("*.fasta.ann");
+    // patterns.push_back("*.fasta");
   for (auto pattern: patterns) {
     auto ret_val = fnmatch(pattern.c_str(), fileName, 0);
     if (ret_val == 0) {
@@ -717,13 +751,15 @@ FILE *fopen64(const char *__restrict fileName, const char *__restrict modes) {
   patterns.push_back("*.fna");
   patterns.push_back("*.fastq");
   patterns.push_back("*.lht");
+  patterns.push_back("*.out");
+patterns.push_back("*.stf");
   patterns.push_back("*.tar.gz");
-    patterns.push_back("*.fasta.amb");
-    patterns.push_back("*.fasta.sa");
-    patterns.push_back("*.fasta.bwt");
-    patterns.push_back("*.fasta.pac");
-    patterns.push_back("*.fasta.ann");
-    patterns.push_back("*.fasta");
+  // patterns.push_back("*.fasta.amb");
+  // patterns.push_back("*.fasta.sa");
+  // patterns.push_back("*.fasta.bwt");
+  // patterns.push_back("*.fasta.pac");
+  // patterns.push_back("*.fasta.ann");
+  // patterns.push_back("*.fasta");
   for (auto pattern: patterns) {
     auto ret_val = fnmatch(pattern.c_str(), fileName, 0);
     if (ret_val == 0) {
@@ -736,27 +772,27 @@ FILE *fopen64(const char *__restrict fileName, const char *__restrict modes) {
 }
 
 int monitorFclose(MonitorFile *file, unsigned int pos, int fd, FILE *fp) {
-#ifdef LIBDEBUG
-  DPRINTF("In monitor fclose \n");
-#endif
 #ifdef TRACKFILECHANGES
   std::vector<std::string> patterns;
   patterns.push_back("*.fits");
   patterns.push_back("*.lht");
+  patterns.push_back("*.out");
+  patterns.push_back("*.stf");
   patterns.push_back("*.tar.gz");
-  patterns.push_back("*.*.bt2");
-  patterns.push_back("*.fna");
-  patterns.push_back("*.fastq");
-  patterns.push_back("*.fasta.amb");
-  patterns.push_back("*.fasta.sa");
-  patterns.push_back("*.fasta.bwt");
-  patterns.push_back("*.fasta.pac");
-  patterns.push_back("*.fasta.ann");
-  patterns.push_back("*.fasta");
+  // patterns.push_back("*.*.bt2");
+  // patterns.push_back("*.fna");
+  // patterns.push_back("*.fastq");
+  // patterns.push_back("*.fasta.amb");
+  // patterns.push_back("*.fasta.sa");
+  // patterns.push_back("*.fasta.bwt");
+  // patterns.push_back("*.fasta.pac");
+  // patterns.push_back("*.fasta.ann");
+  // patterns.push_back("*.fasta");
+
   for (auto pattern: patterns) {
     auto ret_val = fnmatch(pattern.c_str(), file->name().c_str(), 0);
     if (ret_val == 0) {
-      file->close();
+      file->close(); // candice remove
 #ifdef LIBDEBUG
       DPRINTF("Successfully closed a file with fd %d\n", fd);
 #endif
@@ -764,22 +800,24 @@ int monitorFclose(MonitorFile *file, unsigned int pos, int fd, FILE *fp) {
   }
 #endif
     MonitorFile::removeMonitorFile(file);
-    MonitorFileDescriptor::removeMonitorFileDescriptor(fd);
-    //
-// #ifdef TRACKFILECHANGES
-//     return 0;
-// #else
+    MonitorFileDescriptor::removeMonitorFileDescriptor(fd); // candice remove
     
+#ifdef TRACKFILECHANGES
+    return 0;
+#else
     return (*unixfclose)(fp);
-// #endif
+#endif
 }
 
 int fclose(FILE *fp) {
     return outerWrapper("fclose", fp, Timer::Metric::close, monitorFclose, unixfclose, fp);
+    // int fd = fileno(fp);
+    // return outerWrapper("close", fd, Timer::Metric::close, monitorClose, unixclose, fd);
 }
 
 size_t monitorFread(MonitorFile *file, unsigned int pos, int fd, void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp) {
     auto read_bytes = (size_t)file->read(ptr, size * n, pos);
+    timer->addAmt(Timer::MetricType::monitor, Timer::Metric::read, read_bytes); // candice: removed
     if (read_bytes >= size){return n;}
     else return (size_t) (size / n) ;
 }
@@ -801,20 +839,29 @@ size_t monitorFwrite(MonitorFile *file, unsigned int pos, int fd, const void *__
     // DPRINTF("Invoking fwrite %d %d \n", size * n, fd);
 #endif
     auto written_bytes = (size_t)file->write(ptr, size * n, pos);
+    timer->addAmt(Timer::MetricType::monitor, Timer::Metric::write, written_bytes); // candice: removed
     if (written_bytes >= size) return n;
     else return (size_t) (size / n);
 }
 
 size_t fwrite(const void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp) {
 #ifdef LIBDEBUG
-  printf("fwrite Invoking fread\n");
+  printf("fwrite Invoking fwrite\n");
 #endif
     //return outerWrapper("fwrite", fp, Timer::Metric::read, monitorFwrite, unixfwrite, ptr, size, n, fp);
-    return outerWrapper("fwrite", fp, Timer::Metric::write, monitorFwrite, unixfwrite, ptr, size, n, fp);
+    auto ret_val = outerWrapper("fwrite", fp, Timer::Metric::write, 
+              monitorFwrite, unixfwrite, ptr, size, n, fp);
+#ifdef LIBDEBUG
+  DPRINTF("fwrite return value %d\n", ret_val);
+#endif
+  return ret_val;
 }
 
 int monitorVfprintf(MonitorFile *file, unsigned int pos, int fd, FILE * stream, 
 		     const char * format, ...) {
+#ifdef LIBDEBUG
+  DPRINTF("In monitor vfprint \n");
+#endif
   va_list args;
   va_start(args, format);
   auto count = unix_vfprintf(stream, format, args);

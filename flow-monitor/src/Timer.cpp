@@ -72,24 +72,60 @@ Timer::~Timer() {
                 ss << "[MONITOR] " << metricTypeName[i] << " " << metricName[j] << " " << _time[i][j] / billion << " " << _cnt[i][j] << " " << _amt[i][j] << std::endl;
             }
         }
-        //uint64_t thread_count = 0;
-        for(itor = _thread_timers->begin(); itor != _thread_timers->end(); itor++) {
-            //thread_count++;
+        for (itor = _thread_timers->begin(); itor != _thread_timers->end(); itor++) {
             ss << std::endl << "[MONITOR] " << myprogname << " thread " << (*itor).first << std::endl;
             for (int i = 0; i < lastMetric; i++) {
                 for (int j = 0; j < last; j++) {
-                    ss << "[MONITOR] " << metricTypeName[i] << " " << metricName[j] << " " << itor->second->time[i][j]->load(std::memory_order_relaxed) / billion << " "
-                     << itor->second->cnt[i][j]->load(std::memory_order_relaxed) << " " << itor->second->amt[i][j]->load(std::memory_order_relaxed) << std::endl;
+                    ss << "[MONITOR] " << metricTypeName[i] << " " << metricName[j] << " "
+                       << itor->second->time[i][j]->load(std::memory_order_relaxed) / billion << " "
+                       << itor->second->cnt[i][j]->load(std::memory_order_relaxed) << " "
+                       << itor->second->amt[i][j]->load(std::memory_order_relaxed) << std::endl;
                 }
             }
         }
-        dprintf(stdoutcp, "[MONITOR] %s\n%s\n", myprogname.c_str(), ss.str().c_str());
+
+        std::ofstream log_file("monitor_timer.datalife", std::ios::out | std::ios::app);
+        if (!log_file) {
+            std::cerr << "Failed to open monitor_timer.datalife" << std::endl;
+        } else {
+            log_file << "[MONITOR] " << myprogname << std::endl << ss.str();
+            log_file.close();
+        }
     }
-    
-    for(itor = _thread_timers->begin(); itor != _thread_timers->end(); itor++) {
+
+    for (itor = _thread_timers->begin(); itor != _thread_timers->end(); itor++) {
         delete itor->second;
     }
     delete _thread_timers;
+
+    // Old timmer log to stdout
+    // std::unordered_map<std::thread::id, Timer::ThreadMetric*>::iterator itor;
+    // if (Config::printStats) {
+    //     std::stringstream ss;
+    //     ss << std::fixed;
+    //     for (int i = 0; i < lastMetric; i++) {
+    //         for (int j = 0; j < last; j++) {
+    //             ss << "[MONITOR] " << metricTypeName[i] << " " << metricName[j] << " " << _time[i][j] / billion << " " << _cnt[i][j] << " " << _amt[i][j] << std::endl;
+    //         }
+    //     }
+    //     //uint64_t thread_count = 0;
+    //     for(itor = _thread_timers->begin(); itor != _thread_timers->end(); itor++) {
+    //         //thread_count++;
+    //         ss << std::endl << "[MONITOR] " << myprogname << " thread " << (*itor).first << std::endl;
+    //         for (int i = 0; i < lastMetric; i++) {
+    //             for (int j = 0; j < last; j++) {
+    //                 ss << "[MONITOR] " << metricTypeName[i] << " " << metricName[j] << " " << itor->second->time[i][j]->load(std::memory_order_relaxed) / billion << " "
+    //                  << itor->second->cnt[i][j]->load(std::memory_order_relaxed) << " " << itor->second->amt[i][j]->load(std::memory_order_relaxed) << std::endl;
+    //             }
+    //         }
+    //     }
+    //     dprintf(stdoutcp, "[MONITOR] %s\n%s\n", myprogname.c_str(), ss.str().c_str());
+    // }
+    
+    // for(itor = _thread_timers->begin(); itor != _thread_timers->end(); itor++) {
+    //     delete itor->second;
+    // }
+    // delete _thread_timers;
 }
 
 uint64_t Timer::getCurrentTime() {

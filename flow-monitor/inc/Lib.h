@@ -33,7 +33,7 @@
 #include "UnixIO.h"
 #include "ThreadPool.h"
 #include "PriorityThreadPool.h"
-
+#include "TrackFile.h"
 
 #define ADD_THROW __THROW
 
@@ -70,6 +70,11 @@ std::map<std::string, std::map<int, std::atomic<int64_t> > > track_file_blk_w_st
 // For tracing
 std::map<std::string, std::vector<int> > trace_read_blk_seq;
 std::map<std::string, std::vector<int> > trace_write_blk_seq;
+
+// candice added
+std::unordered_map<std::string, TraceData> trace_read_blk_order;
+std::unordered_map<std::string, TraceData> trace_write_blk_order;
+
 
 unixopen_t unixopen = NULL;
 unixopen_t unixopen64 = NULL;
@@ -273,6 +278,8 @@ inline auto innerWrapper(const char *pathname, bool &isMonitorFile, Func monitor
   patterns.push_back("*.gz");
   patterns.push_back("*.txt");
   patterns.push_back("*.lht");
+  patterns.push_back("*.out");
+  patterns.push_back("*.stf");
   patterns.push_back("*.fasta.amb");
   patterns.push_back("*.fasta.sa");
   patterns.push_back("*.fasta.bwt");

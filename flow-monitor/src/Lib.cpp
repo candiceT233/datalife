@@ -141,11 +141,11 @@ void __attribute__((constructor)) monitorInit(void) {
         unixfeof = (unixfeof_t)dlsym(RTLD_NEXT, "feof");
         unixreadv = (unixreadv_t)dlsym(RTLD_NEXT, "readv");
         unixwritev = (unixwritev_t)dlsym(RTLD_NEXT, "writev");
-	unixexit = (unixexit_t)dlsym(RTLD_NEXT, "exit");
-	unix_exit = (unix_exit_t)dlsym(RTLD_NEXT, "_exit");
-	unix_Exit = (unix_Exit_t)dlsym(RTLD_NEXT, "_Exit");
-	unix_exit_group = (unix_exit_group_t)dlsym(RTLD_NEXT, "exit_group");
-	unix_vfprintf = (unix_vfprintf_t)dlsym(RTLD_NEXT, "vfprintf");
+        unixexit = (unixexit_t)dlsym(RTLD_NEXT, "exit");
+        unix_exit = (unix_exit_t)dlsym(RTLD_NEXT, "_exit");
+        unix_Exit = (unix_Exit_t)dlsym(RTLD_NEXT, "_Exit");
+        unix_exit_group = (unix_exit_group_t)dlsym(RTLD_NEXT, "exit_group");
+        unix_vfprintf = (unix_vfprintf_t)dlsym(RTLD_NEXT, "vfprintf");
 
         //enable if running into issues with an application that launches child shells
         bool unsetLib = getenv("MONITOR_UNSET_LIB") ? atoi(getenv("MONITOR_UNSET_LIB")) : 0;
@@ -179,6 +179,7 @@ void __attribute__((destructor)) monitorCleanup(void) {
         }
         delete track_files;
     }
+
     
     //delete InputFile::_cache; //desturctor time tracked by each cache...
     //delete InputFile::_decompressionPool;
@@ -269,6 +270,9 @@ int open(const char *pathname, int flags, ...) {
   patterns.push_back("*.lht");
   patterns.push_back("*.out");
   patterns.push_back("*.stf");
+#ifdef INT_DOT
+  patterns.push_back("*.dot");
+#endif
   // patterns.push_back("*.fasta.amb");
   // patterns.push_back("*.fasta.sa");
   // patterns.push_back("*.fasta.bwt");
@@ -301,12 +305,15 @@ int open64(const char *pathname, int flags, ...) {
     std::vector<std::string> patterns;
     patterns.push_back("*.tar.gz");
     patterns.push_back("*.txt");
+#ifdef INT_DOT
+  patterns.push_back("*.dot");
+#endif
     patterns.push_back("*.lht");
     patterns.push_back("*.out");
 patterns.push_back("*.stf");
-    // patterns.push_back("*.h5");
-    // patterns.push_back("*.vcf");
-    // patterns.push_back("*.out");
+    patterns.push_back("*.h5");
+    patterns.push_back("*.vcf");
+    patterns.push_back("*.out");
 patterns.push_back("*.stf");
     // patterns.push_back("*.fasta.amb");
     // patterns.push_back("*.fasta.sa");
@@ -378,6 +385,9 @@ int openat(int dirfd, const char *pathname, int flags, ...) {
   patterns.push_back("*.vcf");
   patterns.push_back("*.tar.gz");
   patterns.push_back("*.txt");
+#ifdef INT_DOT
+  patterns.push_back("*.dot");
+#endif
     patterns.push_back("*.fasta.amb");
     patterns.push_back("*.fasta.sa");
     patterns.push_back("*.fasta.bwt");
@@ -408,13 +418,16 @@ int monitorClose(MonitorFile *file, unsigned int fp, int fd) {
 #ifdef TRACKFILECHANGES
   std::vector<std::string> patterns;
   patterns.push_back("*.txt");
+#ifdef INT_DOT
+  patterns.push_back("*.dot");
+#endif
   patterns.push_back("*.lht");
   patterns.push_back("*.out");
 patterns.push_back("*.stf");
   patterns.push_back("*.tar.gz");
   patterns.push_back("*.fits");
-  // patterns.push_back("*.h5");
-  // patterns.push_back("*.vcf");
+  patterns.push_back("*.h5");
+  patterns.push_back("*.vcf");
   // patterns.push_back("*.*.bt2");
   // patterns.push_back("*.fna");
   // patterns.push_back("*.fasta.amb");
@@ -720,6 +733,10 @@ FILE *fopen(const char *__restrict fileName, const char *__restrict modes) {
 patterns.push_back("*.stf");
   patterns.push_back("*.tar.gz");
   patterns.push_back("*.txt");
+  patterns.push_back("*.vcf");
+#ifdef INT_DOT
+  patterns.push_back("*.dot");
+#endif
   // patterns.push_back("*.*.bt2");
   // patterns.push_back("*.fna");
   // patterns.push_back("*.fastq");

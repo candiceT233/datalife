@@ -277,6 +277,7 @@ inline auto innerWrapper(const char *pathname, bool &isMonitorFile, Func monitor
   patterns.push_back("*.fastaq");
   patterns.push_back("*.gz");
   patterns.push_back("*.txt");
+  patterns.push_back("*.dot");
   patterns.push_back("*.lht");
   patterns.push_back("*.out");
   patterns.push_back("*.stf");
@@ -286,6 +287,10 @@ inline auto innerWrapper(const char *pathname, bool &isMonitorFile, Func monitor
   patterns.push_back("*.fasta.pac");
   patterns.push_back("*.fasta.ann");
   patterns.push_back("*.fasta");
+#ifdef INT_DOT
+  patterns.push_back("*.dot");
+#endif
+
   for (auto pattern: patterns) {
     auto ret_val = fnmatch(pattern.c_str(), pathname, 0);
     // DPRINTF("PATTERN: %s PATHNAME: %s \n", pattern.c_str(), pathname);

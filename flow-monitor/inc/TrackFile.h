@@ -6,16 +6,26 @@
 #include <mutex>
 #include <string>
 #include <map>
+#include <unordered_map>
+#include <tuple>
 
+#ifdef GATHERSTAT
 extern std::map<std::string, std::map<int, std::atomic<int64_t> > > track_file_blk_r_stat;
 extern std::map<std::string, std::map<int, std::atomic<int64_t> > > track_file_blk_r_stat_size;
 extern std::map<std::string, std::map<int, std::atomic<int64_t> > > track_file_blk_w_stat;
 extern std::map<std::string, std::map<int, std::atomic<int64_t> > > track_file_blk_w_stat_size;
 //extern std::map<std::string, std::map<int, std::tuple<std::atomic<int64_t>, std::atomic<int64_t> > > > track_file_blk_w_stat;
+#endif
 
 // For tracing
 extern std::map<std::string, std::vector<int> > trace_read_blk_seq;
 extern std::map<std::string, std::vector<int> > trace_write_blk_seq;
+
+// candice For tracking
+using TraceData = std::vector<int>;
+extern std::unordered_map<std::string, TraceData> trace_read_blk_order;
+extern std::unordered_map<std::string, TraceData> trace_write_blk_order;
+
 
 class TrackFile : public MonitorFile {
 public:
@@ -47,7 +57,8 @@ private:
   std::chrono::high_resolution_clock::time_point close_file_end_time;
   std::chrono::seconds total_time_spent_read;
   std::chrono::seconds total_time_spent_write;
-};
 
+
+};
 
 #endif /* LOCALFILE_H */

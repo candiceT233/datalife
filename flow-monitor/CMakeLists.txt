@@ -59,6 +59,11 @@ if(INT_DOT)
     add_compile_definitions(INT_DOT)
 endif()
 
+option(TIMER_JSON "Log timer data in JSON format (default to stdout)" OFF)
+if(TIMER_JSON)
+    add_compile_definitions(TIMER_JSON)
+endif()
+
 #****************************************************************************
 # 
 #****************************************************************************

@@ -9,6 +9,9 @@
 #include <thread>
 #include <unistd.h>
 #include <unordered_map>
+#ifdef TIMER_JSON
+#include <json.hpp> // for logging json file
+#endif
 
 extern char *__progname;
 
@@ -63,32 +66,45 @@ Timer::Timer() {
 }
 
 Timer::~Timer() {
+
+#ifdef TIMER_JSON
     std::unordered_map<std::thread::id, Timer::ThreadMetric*>::iterator itor;
     if (Config::printStats) {
-        std::stringstream ss;
-        ss << std::fixed;
+        nlohmann::json jsonOutput;
+        jsonOutput[myprogname] = nlohmann::json::object();
+
+        // Add main metrics to JSON
         for (int i = 0; i < lastMetric; i++) {
             for (int j = 0; j < last; j++) {
-                ss << "[MONITOR] " << metricTypeName[i] << " " << metricName[j] << " " << _time[i][j] / billion << " " << _cnt[i][j] << " " << _amt[i][j] << std::endl;
+                jsonOutput[myprogname][metricTypeName[i]][metricName[j]] = 
+                    { _time[i][j] / billion, _cnt[i][j], _amt[i][j] };
             }
         }
+
+        // Add thread metrics to JSON
         for (itor = _thread_timers->begin(); itor != _thread_timers->end(); itor++) {
-            ss << std::endl << "[MONITOR] " << myprogname << " thread " << (*itor).first << std::endl;
+            // std::string threadId = std::to_string(itor->first);
+            std::stringstream ss;
+            ss << itor->first;
+            std::string threadId = ss.str();
+            jsonOutput[myprogname]["threads"][threadId] = nlohmann::json::object();
+
             for (int i = 0; i < lastMetric; i++) {
                 for (int j = 0; j < last; j++) {
-                    ss << "[MONITOR] " << metricTypeName[i] << " " << metricName[j] << " "
-                       << itor->second->time[i][j]->load(std::memory_order_relaxed) / billion << " "
-                       << itor->second->cnt[i][j]->load(std::memory_order_relaxed) << " "
-                       << itor->second->amt[i][j]->load(std::memory_order_relaxed) << std::endl;
+                    jsonOutput[myprogname]["threads"][threadId][metricTypeName[i]][metricName[j]] = 
+                        { itor->second->time[i][j]->load(std::memory_order_relaxed) / billion,
+                          itor->second->cnt[i][j]->load(std::memory_order_relaxed),
+                          itor->second->amt[i][j]->load(std::memory_order_relaxed) };
                 }
             }
         }
 
-        std::ofstream log_file("monitor_timer.datalife", std::ios::out | std::ios::app);
+        // std::ofstream log_file("monitor_timer.datalife", std::ios::out | std::ios::app); // append
+        std::ofstream log_file("monitor_timer.datalife", std::ios::out | std::ios::trunc); // overwrite
         if (!log_file) {
             std::cerr << "Failed to open monitor_timer.datalife" << std::endl;
         } else {
-            log_file << "[MONITOR] " << myprogname << std::endl << ss.str();
+            log_file << jsonOutput.dump(4); // Pretty print with an indent of 4 spaces
             log_file.close();
         }
     }
@@ -98,34 +114,37 @@ Timer::~Timer() {
     }
     delete _thread_timers;
 
-    // Old timmer log to stdout
-    // std::unordered_map<std::thread::id, Timer::ThreadMetric*>::iterator itor;
-    // if (Config::printStats) {
-    //     std::stringstream ss;
-    //     ss << std::fixed;
-    //     for (int i = 0; i < lastMetric; i++) {
-    //         for (int j = 0; j < last; j++) {
-    //             ss << "[MONITOR] " << metricTypeName[i] << " " << metricName[j] << " " << _time[i][j] / billion << " " << _cnt[i][j] << " " << _amt[i][j] << std::endl;
-    //         }
-    //     }
-    //     //uint64_t thread_count = 0;
-    //     for(itor = _thread_timers->begin(); itor != _thread_timers->end(); itor++) {
-    //         //thread_count++;
-    //         ss << std::endl << "[MONITOR] " << myprogname << " thread " << (*itor).first << std::endl;
-    //         for (int i = 0; i < lastMetric; i++) {
-    //             for (int j = 0; j < last; j++) {
-    //                 ss << "[MONITOR] " << metricTypeName[i] << " " << metricName[j] << " " << itor->second->time[i][j]->load(std::memory_order_relaxed) / billion << " "
-    //                  << itor->second->cnt[i][j]->load(std::memory_order_relaxed) << " " << itor->second->amt[i][j]->load(std::memory_order_relaxed) << std::endl;
-    //             }
-    //         }
-    //     }
-    //     dprintf(stdoutcp, "[MONITOR] %s\n%s\n", myprogname.c_str(), ss.str().c_str());
-    // }
+#else
+
+    std::unordered_map<std::thread::id, Timer::ThreadMetric*>::iterator itor;
+    if (Config::printStats) {
+        std::stringstream ss;
+        ss << std::fixed;
+        for (int i = 0; i < lastMetric; i++) {
+            for (int j = 0; j < last; j++) {
+                ss << "[MONITOR] " << metricTypeName[i] << " " << metricName[j] << " " << _time[i][j] / billion << " " << _cnt[i][j] << " " << _amt[i][j] << std::endl;
+            }
+        }
+        //uint64_t thread_count = 0;
+        for(itor = _thread_timers->begin(); itor != _thread_timers->end(); itor++) {
+            //thread_count++;
+            ss << std::endl << "[MONITOR] " << myprogname << " thread " << (*itor).first << std::endl;
+            for (int i = 0; i < lastMetric; i++) {
+                for (int j = 0; j < last; j++) {
+                    ss << "[MONITOR] " << metricTypeName[i] << " " << metricName[j] << " " << itor->second->time[i][j]->load(std::memory_order_relaxed) / billion << " "
+                     << itor->second->cnt[i][j]->load(std::memory_order_relaxed) << " " << itor->second->amt[i][j]->load(std::memory_order_relaxed) << std::endl;
+                }
+            }
+        }
+        dprintf(stdoutcp, "[MONITOR] %s\n%s\n", myprogname.c_str(), ss.str().c_str());
+    }
     
-    // for(itor = _thread_timers->begin(); itor != _thread_timers->end(); itor++) {
-    //     delete itor->second;
-    // }
-    // delete _thread_timers;
+    for(itor = _thread_timers->begin(); itor != _thread_timers->end(); itor++) {
+        delete itor->second;
+    }
+    delete _thread_timers;
+
+#endif
 }
 
 uint64_t Timer::getCurrentTime() {

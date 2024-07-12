@@ -107,7 +107,7 @@ Timer::~Timer() {
         } else {
             log_file << jsonOutput.dump(4); // Pretty print with an indent of 4 spaces
             // Add a "," to the end of the monitor_timer.datalife.json file
-            log_file << ",";
+            // log_file << ","; // not needed when files are seperated into task PID
             log_file.close();
         }
     }

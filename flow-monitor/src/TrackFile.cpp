@@ -30,6 +30,11 @@
 #include <functional>
 #include <chrono>
 
+#ifdef BLK_IDX
+#include <json.hpp> // for logging json file
+#endif
+
+
 using namespace std::chrono;
 #ifdef LIBDEBUG
 #define DPRINTF(...) fprintf(stderr, __VA_ARGS__)
@@ -328,28 +333,51 @@ off_t TrackFile::seek(off_t offset, int whence, uint32_t index) {
 }
 
 // Function to write trace data to file including access pattern (sequential or random)
+// void write_trace_data(const std::string& filename, TraceData& blk_trace_info, const std::string& pid) {
+//     if (blk_trace_info.empty()) {
+//         return;  // Do nothing if blk_trace_info is empty
+//     }
+
+//     std::ostringstream oss;
+
+//     // Write block ranges and clear the vector
+//     for (size_t i = 0; i < blk_trace_info.size(); i += 2) {
+//         oss << blk_trace_info[i] << " " << blk_trace_info[i + 1] << "\n";
+//     }
+//     blk_trace_info.clear(); // Clear the vector after writing
+
+//     // Write the contents of the string stream to the file at once
+//     std::ofstream file(filename, std::ios::out | std::ios::app);
+//     if (!file) {
+//         std::cerr << "File for trace stat collection not created!" << std::endl;
+//         return;
+//     }
+//     file << oss.str();
+//     file.close();
+// }
+
 void write_trace_data(const std::string& filename, TraceData& blk_trace_info, const std::string& pid) {
     if (blk_trace_info.empty()) {
         return;  // Do nothing if blk_trace_info is empty
     }
 
-    std::ostringstream oss;
+    // Create JSON object
+    nlohmann::json jsonOutput;
+    jsonOutput["io_blk_range"] = blk_trace_info;
 
-    // Write block ranges and clear the vector
-    for (size_t i = 0; i < blk_trace_info.size(); i += 2) {
-        oss << blk_trace_info[i] << " " << blk_trace_info[i + 1] << "\n";
-    }
-    blk_trace_info.clear(); // Clear the vector after writing
+    // Clear the vector after creating JSON object
+    blk_trace_info.clear();
 
-    // Write the contents of the string stream to the file at once
-    std::ofstream file(filename, std::ios::out | std::ios::app);
+    // Write the JSON object to the file
+    std::ofstream file(filename, std::ios::out | std::ios::trunc); // Use trunc to overwrite the file
     if (!file) {
         std::cerr << "File for trace stat collection not created!" << std::endl;
         return;
     }
-    file << oss.str();
+    file << jsonOutput.dump(4); // Pretty print with an indent of 4 spaces
     file.close();
 }
+
 
 
 void TrackFile::close() {
@@ -372,12 +400,14 @@ void TrackFile::close() {
 
 #ifdef BLK_IDX
     DPRINTF("Writing r blk access order stat\n");
-    std::string file_name_trace_r = _filename + "_" + pid + "_r_blk_trace";
+    // std::string file_name_trace_r = _filename + "_" + pid + "_r_blk_trace";
+    std::string file_name_trace_r = _filename + "." + pid + ".r_blk_trace.json";
     auto& blk_trace_info_r = trace_read_blk_order[_filename];
     auto future_r = std::async(std::launch::async, write_trace_data, file_name_trace_r, std::ref(blk_trace_info_r), pid);
 
     DPRINTF("Writing w blk access order stat\n");
-    std::string file_name_trace_w = _filename + "_" + pid + "_w_blk_trace";
+    // std::string file_name_trace_w = _filename + "_" + pid + "_w_blk_trace";
+    std::string file_name_trace_w = _filename + "." + pid + ".w_blk_trace.json";
     auto& blk_trace_info_w = trace_write_blk_order[_filename];
     auto future_w = std::async(std::launch::async, write_trace_data, file_name_trace_w, std::ref(blk_trace_info_w), pid);
 

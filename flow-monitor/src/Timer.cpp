@@ -98,13 +98,16 @@ Timer::~Timer() {
                 }
             }
         }
-
-        // std::ofstream log_file("monitor_timer.datalife", std::ios::out | std::ios::app); // append
-        std::ofstream log_file("monitor_timer.datalife", std::ios::out | std::ios::trunc); // overwrite
+        // Add task PID to file name 
+        std::string jsonOutputFileName = "monitor_timer." + std::to_string(getpid()) + ".datalife.json";
+        std::ofstream log_file(jsonOutputFileName, std::ios::out | std::ios::app); // append
+        // std::ofstream log_file("monitor_timer.datalife.json", std::ios::out | std::ios::trunc); // overwrite
         if (!log_file) {
-            std::cerr << "Failed to open monitor_timer.datalife" << std::endl;
+            std::cerr << "Failed to open " << jsonOutputFileName << std::endl;
         } else {
             log_file << jsonOutput.dump(4); // Pretty print with an indent of 4 spaces
+            // Add a "," to the end of the monitor_timer.datalife.json file
+            log_file << ",";
             log_file.close();
         }
     }
@@ -208,6 +211,11 @@ void Timer::end(MetricType type, Metric metric) {
         (*_thread_timers)[id]->depth->fetch_sub(1, std::memory_order_relaxed);
         _lock.readerUnlock();
     }
+
+    
+#ifdef TIMER_JSON
+    // TODO: Remove the last comma from the monitor_timer.datalife.json file
+#endif
 }
 
 void Timer::addAmt(MetricType type, Metric metric, uint64_t amt) {

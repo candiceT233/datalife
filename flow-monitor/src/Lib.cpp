@@ -259,20 +259,28 @@ int open(const char *pathname, int flags, ...) {
   va_end(arg);
 
   Timer::Metric metric = (flags & O_WRONLY || flags & O_RDWR) ? Timer::Metric::out_open : Timer::Metric::in_open;
-    
-  std::vector<std::string> patterns;
-  patterns.push_back("*.h5");
-  patterns.push_back("*.vcf");
-  patterns.push_back("*.fna");
-  patterns.push_back("*.*.bt2");
-  patterns.push_back("*.tar.gz");
-  patterns.push_back("*.txt");
-  patterns.push_back("*.lht");
-  patterns.push_back("*.out");
-  patterns.push_back("*.stf");
-#ifdef INT_DOT
-  patterns.push_back("*.dot");
-#endif
+
+  std::vector<std::string> patterns = {
+    "*.h5", "*.fits", "*.vcf", "*.tar.gz", "*.txt", "*.lht", "*.fna",
+    "*.*.bt2", "*.fastq", "*.fasta.amb", "*.fasta.sa", "*.fasta.bwt",
+    "*.fasta.pac", "*.fasta.ann", "*.fasta", "*.stf", 
+    "*.out", "*.dot",
+    "SAS", "EAS", "GBR", "AMR", "AFR", "EUR", "ALL", "*.gz"
+  };
+
+//   std::vector<std::string> patterns;
+//   patterns.push_back("*.h5");
+//   patterns.push_back("*.vcf");
+//   patterns.push_back("*.fna");
+//   patterns.push_back("*.*.bt2");
+//   patterns.push_back("*.tar.gz");
+//   patterns.push_back("*.txt");
+//   patterns.push_back("*.lht");
+//   patterns.push_back("*.out");
+//   patterns.push_back("*.stf");
+// #ifdef INT_DOT
+//   patterns.push_back("*.dot");
+// #endif
   // patterns.push_back("*.fasta.amb");
   // patterns.push_back("*.fasta.sa");
   // patterns.push_back("*.fasta.bwt");
@@ -302,25 +310,13 @@ int open64(const char *pathname, int flags, ...) {
 
     Timer::Metric metric = (flags & O_WRONLY || flags & O_RDWR) ? Timer::Metric::out_open : Timer::Metric::in_open;
 
-    std::vector<std::string> patterns;
-    patterns.push_back("*.tar.gz");
-    patterns.push_back("*.txt");
-#ifdef INT_DOT
-  patterns.push_back("*.dot");
-#endif
-    patterns.push_back("*.lht");
-    patterns.push_back("*.out");
-patterns.push_back("*.stf");
-    patterns.push_back("*.h5");
-    patterns.push_back("*.vcf");
-    patterns.push_back("*.out");
-patterns.push_back("*.stf");
-    // patterns.push_back("*.fasta.amb");
-    // patterns.push_back("*.fasta.sa");
-    // patterns.push_back("*.fasta.bwt");
-    // patterns.push_back("*.fasta.pac");
-    // patterns.push_back("*.fasta.ann");
-    // patterns.push_back("*.fasta");
+    std::vector<std::string> patterns = {
+      "*.h5", "*.fits", "*.vcf", "*.tar.gz", "*.txt", "*.lht", "*.fna",
+      "*.*.bt2", "*.fastq", "*.fasta.amb", "*.fasta.sa", "*.fasta.bwt",
+      "*.fasta.pac", "*.fasta.ann", "*.fasta", "*.stf", 
+      "*.out", "*.dot",
+      "SAS", "EAS", "GBR", "AMR", "AFR", "EUR", "ALL", "*.gz"
+    };
 
     for (auto pattern: patterns) {
         auto ret_val = fnmatch(pattern.c_str(), pathname, 0);
@@ -380,20 +376,28 @@ int openat(int dirfd, const char *pathname, int flags, ...) {
 #ifdef LIBDEBUG
   DPRINTF("Openat %s: \n", pathname);
 #endif
-  std::vector<std::string> patterns;
-  patterns.push_back("*.h5");
-  patterns.push_back("*.vcf");
-  patterns.push_back("*.tar.gz");
-  patterns.push_back("*.txt");
-#ifdef INT_DOT
-  patterns.push_back("*.dot");
-#endif
-    patterns.push_back("*.fasta.amb");
-    patterns.push_back("*.fasta.sa");
-    patterns.push_back("*.fasta.bwt");
-    patterns.push_back("*.fasta.pac");
-    patterns.push_back("*.fasta.ann");
-    patterns.push_back("*.fasta");
+  std::vector<std::string> patterns = {
+    "*.h5", "*.fits", "*.vcf", "*.tar.gz", "*.txt", "*.lht", "*.fna",
+    "*.*.bt2", "*.fastq", "*.fasta.amb", "*.fasta.sa", "*.fasta.bwt",
+    "*.fasta.pac", "*.fasta.ann", "*.fasta", "*.stf", 
+    "*.out", "*.dot",
+    "SAS", "EAS", "GBR", "AMR", "AFR", "EUR", "ALL", "*.gz"
+  };
+
+//   std::vector<std::string> patterns;
+//   patterns.push_back("*.h5");
+//   patterns.push_back("*.vcf");
+//   patterns.push_back("*.tar.gz");
+//   patterns.push_back("*.txt");
+// #ifdef INT_DOT
+//   patterns.push_back("*.dot");
+// #endif
+//     patterns.push_back("*.fasta.amb");
+//     patterns.push_back("*.fasta.sa");
+//     patterns.push_back("*.fasta.bwt");
+//     patterns.push_back("*.fasta.pac");
+//     patterns.push_back("*.fasta.ann");
+//     patterns.push_back("*.fasta");
   for (auto pattern: patterns) {
     auto ret_val = fnmatch(pattern.c_str(), pathname, 0);
     if (ret_val == 0) {
@@ -416,18 +420,27 @@ int monitorClose(MonitorFile *file, unsigned int fp, int fd) {
 
 // candice commented out
 #ifdef TRACKFILECHANGES
-  std::vector<std::string> patterns;
-  patterns.push_back("*.txt");
-#ifdef INT_DOT
-  patterns.push_back("*.dot");
-#endif
-  patterns.push_back("*.lht");
-  patterns.push_back("*.out");
-patterns.push_back("*.stf");
-  patterns.push_back("*.tar.gz");
-  patterns.push_back("*.fits");
-  patterns.push_back("*.h5");
-  patterns.push_back("*.vcf");
+
+  std::vector<std::string> patterns = {
+    "*.h5", "*.fits", "*.vcf", "*.tar.gz", "*.txt", "*.lht", "*.fna",
+    "*.*.bt2", "*.fastq", "*.fasta.amb", "*.fasta.sa", "*.fasta.bwt",
+    "*.fasta.pac", "*.fasta.ann", "*.fasta", "*.stf", 
+    "*.out", "*.dot",
+    "SAS", "EAS", "GBR", "AMR", "AFR", "EUR", "ALL", "*.gz"
+  };
+
+//   std::vector<std::string> patterns;
+//   patterns.push_back("*.txt");
+// #ifdef INT_DOT
+//   patterns.push_back("*.dot");
+// #endif
+//   patterns.push_back("*.lht");
+//   patterns.push_back("*.out");
+// patterns.push_back("*.stf");
+//   patterns.push_back("*.tar.gz");
+//   patterns.push_back("*.fits");
+//   patterns.push_back("*.h5");
+//   patterns.push_back("*.vcf");
   // patterns.push_back("*.*.bt2");
   // patterns.push_back("*.fna");
   // patterns.push_back("*.fasta.amb");
@@ -726,17 +739,25 @@ FILE *fopen(const char *__restrict fileName, const char *__restrict modes) {
 #endif
   Timer::Metric metric = (modes[0] == 'r') ? Timer::Metric::in_fopen : Timer::Metric::out_fopen;
 
-  std::vector<std::string> patterns;
-  patterns.push_back("*.fits");
-  patterns.push_back("*.lht");
-  patterns.push_back("*.out");
-patterns.push_back("*.stf");
-  patterns.push_back("*.tar.gz");
-  patterns.push_back("*.txt");
-  patterns.push_back("*.vcf");
-#ifdef INT_DOT
-  patterns.push_back("*.dot");
-#endif
+  std::vector<std::string> patterns = {
+    "*.h5", "*.fits", "*.vcf", "*.tar.gz", "*.txt", "*.lht", "*.fna",
+    "*.*.bt2", "*.fastq", "*.fasta.amb", "*.fasta.sa", "*.fasta.bwt",
+    "*.fasta.pac", "*.fasta.ann", "*.fasta", "*.stf", 
+    "*.out", "*.dot",
+    "SAS", "EAS", "GBR", "AMR", "AFR", "EUR", "ALL", "*.gz"
+  };
+
+//   std::vector<std::string> patterns;
+//   patterns.push_back("*.fits");
+//   patterns.push_back("*.lht");
+//   patterns.push_back("*.out");
+// patterns.push_back("*.stf");
+//   patterns.push_back("*.tar.gz");
+//   patterns.push_back("*.txt");
+//   patterns.push_back("*.vcf");
+// #ifdef INT_DOT
+//   patterns.push_back("*.dot");
+// #endif
   // patterns.push_back("*.*.bt2");
   // patterns.push_back("*.fna");
   // patterns.push_back("*.fastq");

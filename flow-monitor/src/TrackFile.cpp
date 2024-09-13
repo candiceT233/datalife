@@ -30,9 +30,7 @@
 #include <functional>
 #include <chrono>
 
-#ifdef BLK_IDX
 #include <json.hpp> // for logging json file
-#endif
 
 
 using namespace std::chrono;
@@ -42,9 +40,8 @@ using namespace std::chrono;
 #define DPRINTF(...)
 #endif
 
-#ifdef BLK_IDX
 #define BLK_SIZE 4096 // 4KB 8KB
-#endif
+
 // #define GATHERSTAT 1
 #define USE_HASH 1
 // #define ENABLE_TRACE 1
@@ -136,12 +133,56 @@ ssize_t TrackFile::read(void *buf, size_t count, uint32_t index) {
 #ifdef BLK_IDX
     auto start_block = _filePos[index] / BLK_SIZE;
     auto end_block = (_filePos[index] + count) / BLK_SIZE;
-    // TraceData block_range = std::make_tuple(start_block, end_block);
-    // auto& trace_vector = trace_read_blk_order[_name];
-    // trace_vector.emplace_back(block_range);
     auto& trace_vector = trace_read_blk_order[_name];
     trace_vector.push_back(start_block);
     trace_vector.push_back(end_block);
+
+#else
+    auto start_block = _filePos[index] / BLK_SIZE;
+    auto end_block = (_filePos[index] + count) / BLK_SIZE;
+
+    if (first_access_block == -1){
+        first_access_block = start_block;
+    } 
+
+    // Retrieve the trace vector for the current file
+    auto& trace_vector = trace_read_blk_order[_name];
+
+    // Check if trace_vector has at least 3 elements
+    if (trace_vector.size() < 3) {
+        // Initialize vector if it does not have enough elements
+        trace_vector.resize(3, -2); // Default to -2
+    }
+
+    // Update the first and second values in trace_vector
+    trace_vector[0] = start_block;
+    trace_vector[1] = end_block;
+
+    // Determine the status (-1 or -2)
+    if (prev_start_block != -1 && prev_end_block != -1 && !has_been_random) {
+        if (start_block >= prev_end_block) {
+            // Sequential: store -1
+            trace_vector[2] = -1;
+            // Update previous blocks
+            prev_start_block = start_block;
+            prev_end_block = end_block;
+        } else {
+            // Random: store -2 and flag to stop further checks
+            trace_vector[2] = -2;
+            has_been_random = true;
+        }
+    } else {
+        // No previous blocks to compare or already flagged as random
+        if (prev_start_block == -1 && prev_end_block == -1) {
+            // First block
+            trace_vector[2] = -1;
+            prev_start_block = start_block;
+            prev_end_block = end_block;
+        } else {
+            // No valid previous blocks for comparison
+            trace_vector[2] = -2;
+        }
+    }
 #endif
 
 #ifdef GATHERSTAT
@@ -209,12 +250,57 @@ ssize_t TrackFile::write(const void *buf, size_t count, uint32_t index) {
 #ifdef BLK_IDX
     auto start_block = _filePos[index] / BLK_SIZE;
     auto end_block = (_filePos[index] + count) / BLK_SIZE;
-    // TraceData block_range = std::make_tuple(start_block, end_block);
-    // auto& trace_vector = trace_write_blk_order[_name];
-    // trace_vector.emplace_back(block_range);
     auto& trace_vector = trace_write_blk_order[_name];
     trace_vector.push_back(start_block);
     trace_vector.push_back(end_block);
+
+#else
+
+  auto start_block = _filePos[index] / BLK_SIZE;
+  auto end_block = (_filePos[index] + count) / BLK_SIZE;
+
+  if (first_access_block == -1){
+    first_access_block = start_block;
+  } 
+
+  // Retrieve the trace vector for the current file
+  auto& trace_vector = trace_write_blk_order[_name];
+
+  // Check if trace_vector has at least 3 elements
+  if (trace_vector.size() < 3) {
+      // Initialize vector if it does not have enough elements
+      trace_vector.resize(3, -2); // Default to -2
+  }
+
+  // Update the first and second values in trace_vector
+  trace_vector[0] = start_block;
+  trace_vector[1] = end_block;
+
+  // Determine the status (-1 or -2)
+  if (prev_start_block != -1 && prev_end_block != -1 && !has_been_random) {
+      if (start_block >= prev_end_block) {
+          // Sequential: store -1
+          trace_vector[2] = -1;
+          // Update previous blocks
+          prev_start_block = start_block;
+          prev_end_block = end_block;
+      } else {
+          // Random: store -2 and flag to stop further checks
+          trace_vector[2] = -2;
+          has_been_random = true;
+      }
+  } else {
+      // No previous blocks to compare or already flagged as random
+      if (prev_start_block == -1 && prev_end_block == -1) {
+          // First block
+          trace_vector[2] = -1;
+          prev_start_block = start_block;
+          prev_end_block = end_block;
+      } else {
+          // No valid previous blocks for comparison
+          trace_vector[2] = -2;
+      }
+  }
 #endif
 
 #ifdef GATHERSTAT
@@ -332,30 +418,6 @@ off_t TrackFile::seek(off_t offset, int whence, uint32_t index) {
   return  offset_loc; 
 }
 
-// Function to write trace data to file including access pattern (sequential or random)
-// void write_trace_data(const std::string& filename, TraceData& blk_trace_info, const std::string& pid) {
-//     if (blk_trace_info.empty()) {
-//         return;  // Do nothing if blk_trace_info is empty
-//     }
-
-//     std::ostringstream oss;
-
-//     // Write block ranges and clear the vector
-//     for (size_t i = 0; i < blk_trace_info.size(); i += 2) {
-//         oss << blk_trace_info[i] << " " << blk_trace_info[i + 1] << "\n";
-//     }
-//     blk_trace_info.clear(); // Clear the vector after writing
-
-//     // Write the contents of the string stream to the file at once
-//     std::ofstream file(filename, std::ios::out | std::ios::app);
-//     if (!file) {
-//         std::cerr << "File for trace stat collection not created!" << std::endl;
-//         return;
-//     }
-//     file << oss.str();
-//     file.close();
-// }
-
 void write_trace_data(const std::string& filename, TraceData& blk_trace_info, const std::string& pid) {
     if (blk_trace_info.empty()) {
         return;  // Do nothing if blk_trace_info is empty
@@ -363,7 +425,17 @@ void write_trace_data(const std::string& filename, TraceData& blk_trace_info, co
 
     // Create JSON object
     nlohmann::json jsonOutput;
+
+#ifdef BLK_IDX
     jsonOutput["io_blk_range"] = blk_trace_info;
+#else
+    //TODO: modify the first index of blk_trace_info to first_access_block
+    // Ensure blk_trace_info has at least one element before modifying
+    if (!blk_trace_info.empty()) {
+        blk_trace_info[0] = first_access_block;
+    }
+    jsonOutput["io_blk_range"] = blk_trace_info;
+#endif
 
     // Clear the vector after creating JSON object
     blk_trace_info.clear();
@@ -398,7 +470,7 @@ void TrackFile::close() {
   auto elapsed_time = duration_cast<seconds>(close_file_end_time - open_file_start_time);
 
 
-#ifdef BLK_IDX
+
     DPRINTF("Writing r blk access order stat\n");
     // std::string file_name_trace_r = _filename + "_" + pid + "_r_blk_trace";
     std::string file_name_trace_r = _filename + "." + pid + ".r_blk_trace.json";
@@ -414,7 +486,7 @@ void TrackFile::close() {
     // Wait for both async tasks to complete
     future_r.get();
     future_w.get();
-#endif
+
 
 
 #ifdef GATHERSTAT

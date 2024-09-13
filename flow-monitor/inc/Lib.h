@@ -74,7 +74,7 @@ std::map<std::string, std::vector<int> > trace_write_blk_seq;
 // candice added
 std::unordered_map<std::string, TraceData> trace_read_blk_order;
 std::unordered_map<std::string, TraceData> trace_write_blk_order;
-
+int first_access_block;
 
 unixopen_t unixopen = NULL;
 unixopen_t unixopen64 = NULL;

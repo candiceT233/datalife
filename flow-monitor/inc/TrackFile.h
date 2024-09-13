@@ -25,7 +25,7 @@ extern std::map<std::string, std::vector<int> > trace_write_blk_seq;
 using TraceData = std::vector<int>;
 extern std::unordered_map<std::string, TraceData> trace_read_blk_order;
 extern std::unordered_map<std::string, TraceData> trace_write_blk_order;
-
+extern int first_access_block;
 
 class TrackFile : public MonitorFile {
 public:
@@ -58,6 +58,11 @@ private:
   std::chrono::seconds total_time_spent_read;
   std::chrono::seconds total_time_spent_write;
 
+  // Add members to keep track of previous blocks
+  int prev_start_block = -1;
+  int prev_end_block = -1;
+  bool has_been_random = false;
+  
 
 };
 

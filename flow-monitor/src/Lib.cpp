@@ -43,6 +43,7 @@
 #include <cassert>
 #include <errno.h>
 
+
 #define DPRINTF(...) fprintf(stderr, __VA_ARGS__)
 // #define DPRINTF(...)
 #define MONITOR_ID "MONITOR"
@@ -51,6 +52,7 @@
 #define MONITOR_VERSION_LEN 3 //5+3
 
 #define TRACKFILECHANGES 1 // tmp-ly added
+
 
 class CleanupTrackFile {
 public:
@@ -209,11 +211,18 @@ int removeStr(char *s, const char *r) {
 
 
 int trackFileOpen(std::string name, std::string metaName, MonitorFile::Type type, const char *pathname, int flags, int mode) {
+
+  // Add O_CREAT if file creation is happens
+  if (flags & O_RDWR && !(flags & O_CREAT)) {
+    DPRINTF("Adding O_CREAT flag to open call.\n");
+    flags |= O_CREAT;
+  }
+
 #ifdef LIBDEBUG
   DPRINTF("trackfileOpen: %s %s %u\n", name.c_str(), metaName.c_str(), type);
 #endif
   auto fd = (*unixopen64)(name.c_str(), flags, mode);
-  if (fd > 0) {  
+  if (fd >= 0) {  
     MonitorFile *file = MonitorFile::addNewMonitorFile(type, name, name, fd, true);
     if (file) {
       MonitorFileDescriptor::addMonitorFileDescriptor(fd, file, file->newFilePosIndex());
@@ -225,7 +234,7 @@ int trackFileOpen(std::string name, std::string metaName, MonitorFile::Type type
 #ifdef LIBDEBUG
     DPRINTF("fd value %d\n", fd);
 #endif
-    DPRINTF("Error opening file: %s flag: %d mode: %d \n", strerror(errno), flags, mode);
+    DPRINTF("trackFileOpen() Error opening file: %s, message: %s flag: %d mode: %d \n", name.c_str(), strerror(errno), flags, mode);
   }
   return fd;
 }
@@ -260,33 +269,8 @@ int open(const char *pathname, int flags, ...) {
 
   Timer::Metric metric = (flags & O_WRONLY || flags & O_RDWR) ? Timer::Metric::out_open : Timer::Metric::in_open;
 
-  std::vector<std::string> patterns = {
-    "*.h5", "*.fits", "*.vcf", "*.tar.gz", "*.txt", "*.lht", "*.fna",
-    "*.*.bt2", "*.fastq", "*.fasta.amb", "*.fasta.sa", "*.fasta.bwt",
-    "*.fasta.pac", "*.fasta.ann", "*.fasta", "*.stf", 
-    "*.out", "*.dot",
-    "SAS", "EAS", "GBR", "AMR", "AFR", "EUR", "ALL", "*.gz"
-  };
 
-//   std::vector<std::string> patterns;
-//   patterns.push_back("*.h5");
-//   patterns.push_back("*.vcf");
-//   patterns.push_back("*.fna");
-//   patterns.push_back("*.*.bt2");
-//   patterns.push_back("*.tar.gz");
-//   patterns.push_back("*.txt");
-//   patterns.push_back("*.lht");
-//   patterns.push_back("*.out");
-//   patterns.push_back("*.stf");
-// #ifdef INT_DOT
-//   patterns.push_back("*.dot");
-// #endif
-  // patterns.push_back("*.fasta.amb");
-  // patterns.push_back("*.fasta.sa");
-  // patterns.push_back("*.fasta.bwt");
-  // patterns.push_back("*.fasta.pac");
-  // patterns.push_back("*.fasta.ann");
-  // patterns.push_back("*.fasta");
+
   for (auto pattern: patterns) {
     auto ret_val = fnmatch(pattern.c_str(), pathname, 0);
     if (ret_val == 0) {
@@ -301,6 +285,8 @@ int open(const char *pathname, int flags, ...) {
   return outerWrapper("open", pathname, metric, monitorOpen, unixopen, pathname, flags, mode);
 }
 
+
+
 int open64(const char *pathname, int flags, ...) {
     int mode = 0;
     va_list arg;
@@ -310,13 +296,7 @@ int open64(const char *pathname, int flags, ...) {
 
     Timer::Metric metric = (flags & O_WRONLY || flags & O_RDWR) ? Timer::Metric::out_open : Timer::Metric::in_open;
 
-    std::vector<std::string> patterns = {
-      "*.h5", "*.fits", "*.vcf", "*.tar.gz", "*.txt", "*.lht", "*.fna",
-      "*.*.bt2", "*.fastq", "*.fasta.amb", "*.fasta.sa", "*.fasta.bwt",
-      "*.fasta.pac", "*.fasta.ann", "*.fasta", "*.stf", 
-      "*.out", "*.dot",
-      "SAS", "EAS", "GBR", "AMR", "AFR", "EUR", "ALL", "*.gz"
-    };
+
 
     for (auto pattern: patterns) {
         auto ret_val = fnmatch(pattern.c_str(), pathname, 0);
@@ -324,7 +304,7 @@ int open64(const char *pathname, int flags, ...) {
 #ifdef LIBDEBUG
             DPRINTF("Firing off trackFileOpen[64] for %s \n ", pathname);
 #endif
-            return outerWrapper("open", pathname, metric, trackFileOpen, unixopen64, 
+            return outerWrapper("open64", pathname, metric, trackFileOpen, unixopen64, 
 			    pathname, flags, mode);
         }
     }
@@ -358,7 +338,7 @@ int trackFileOpenat(std::string name, std::string metaName, MonitorFile::Type ty
 #ifdef LIBDEBUG
     DPRINTF("fd value %d\n", fd);
 #endif
-    DPRINTF("Error opening file: %s flag: %d mode: %d \n", strerror(errno), flags, mode);
+    DPRINTF("trackFileOpenat() Error opening file: %s flag: %d mode: %d \n", strerror(errno), flags, mode);
   }
   return fd;
 }
@@ -376,28 +356,8 @@ int openat(int dirfd, const char *pathname, int flags, ...) {
 #ifdef LIBDEBUG
   DPRINTF("Openat %s: \n", pathname);
 #endif
-  std::vector<std::string> patterns = {
-    "*.h5", "*.fits", "*.vcf", "*.tar.gz", "*.txt", "*.lht", "*.fna",
-    "*.*.bt2", "*.fastq", "*.fasta.amb", "*.fasta.sa", "*.fasta.bwt",
-    "*.fasta.pac", "*.fasta.ann", "*.fasta", "*.stf", 
-    "*.out", "*.dot",
-    "SAS", "EAS", "GBR", "AMR", "AFR", "EUR", "ALL", "*.gz"
-  };
 
-//   std::vector<std::string> patterns;
-//   patterns.push_back("*.h5");
-//   patterns.push_back("*.vcf");
-//   patterns.push_back("*.tar.gz");
-//   patterns.push_back("*.txt");
-// #ifdef INT_DOT
-//   patterns.push_back("*.dot");
-// #endif
-//     patterns.push_back("*.fasta.amb");
-//     patterns.push_back("*.fasta.sa");
-//     patterns.push_back("*.fasta.bwt");
-//     patterns.push_back("*.fasta.pac");
-//     patterns.push_back("*.fasta.ann");
-//     patterns.push_back("*.fasta");
+
   for (auto pattern: patterns) {
     auto ret_val = fnmatch(pattern.c_str(), pathname, 0);
     if (ret_val == 0) {
@@ -421,34 +381,6 @@ int monitorClose(MonitorFile *file, unsigned int fp, int fd) {
 // candice commented out
 #ifdef TRACKFILECHANGES
 
-  std::vector<std::string> patterns = {
-    "*.h5", "*.fits", "*.vcf", "*.tar.gz", "*.txt", "*.lht", "*.fna",
-    "*.*.bt2", "*.fastq", "*.fasta.amb", "*.fasta.sa", "*.fasta.bwt",
-    "*.fasta.pac", "*.fasta.ann", "*.fasta", "*.stf", 
-    "*.out", "*.dot",
-    "SAS", "EAS", "GBR", "AMR", "AFR", "EUR", "ALL", "*.gz"
-  };
-
-//   std::vector<std::string> patterns;
-//   patterns.push_back("*.txt");
-// #ifdef INT_DOT
-//   patterns.push_back("*.dot");
-// #endif
-//   patterns.push_back("*.lht");
-//   patterns.push_back("*.out");
-// patterns.push_back("*.stf");
-//   patterns.push_back("*.tar.gz");
-//   patterns.push_back("*.fits");
-//   patterns.push_back("*.h5");
-//   patterns.push_back("*.vcf");
-  // patterns.push_back("*.*.bt2");
-  // patterns.push_back("*.fna");
-  // patterns.push_back("*.fasta.amb");
-  // patterns.push_back("*.fasta.sa");
-  // patterns.push_back("*.fasta.bwt");
-  // patterns.push_back("*.fasta.pac");
-  // patterns.push_back("*.fasta.ann");
-  // patterns.push_back("*.fasta");
 
 
   for (auto pattern: patterns) {
@@ -530,9 +462,6 @@ ssize_t monitorRead(MonitorFile *file, unsigned int fp, int fd, void *buf, size_
   
   ssize_t ret = file->read(buf, count, fp);
   timer->addAmt(Timer::MetricType::monitor, Timer::Metric::read, ret); // candice: removed
-  // DPRINTF("In Monitor read count %ld\n", count);
-  // DPRINTF("In Monitor read ret %ld\n", ret);
-  // timer->addAmt(Timer::MetricType::monitor, Timer::Metric::read, count); // candice: removed 
   return ret;
 #ifdef LIBDEBUG
     DPRINTF("Returning from Monitor read\n");
@@ -688,10 +617,26 @@ ssize_t monitorVector(const char *name, Timer::Metric metric, Func monitorFun, F
 }
 
 ssize_t readv(int fd, const struct iovec *iov, int iovcnt) {
+    // // Calculate the total number of bytes in the iovec array
+    // ssize_t read_bytes = 0;
+    // for (int i = 0; i < iovcnt; ++i) {
+    //     read_bytes += iov[i].iov_len;
+    // }
+    // ssize_t read_bytes = sizeof(iov) * iovcnt;
+    // timer->addAmt(Timer::MetricType::monitor, Timer::Metric::read, read_bytes); // candice: added
+
     return monitorVector("read", Timer::Metric::readv, monitorRead, unixread, fd, iov, iovcnt);
 }
 
 ssize_t writev(int fd, const struct iovec *iov, int iovcnt) {
+    // // Calculate the total number of bytes in the iovec array
+    // ssize_t write_bytes = 0;
+    // for (int i = 0; i < iovcnt; ++i) {
+    //     write_bytes += iov[i].iov_len;
+    // }
+    // ssize_t write_bytes = sizeof(iov) * iovcnt;
+    // timer->addAmt(Timer::MetricType::monitor, Timer::Metric::write, write_bytes); // candice: added
+
     return monitorVector("write", Timer::Metric::writev, monitorWrite, unixwrite, fd, iov, iovcnt);
 }
 
@@ -739,34 +684,8 @@ FILE *fopen(const char *__restrict fileName, const char *__restrict modes) {
 #endif
   Timer::Metric metric = (modes[0] == 'r') ? Timer::Metric::in_fopen : Timer::Metric::out_fopen;
 
-  std::vector<std::string> patterns = {
-    "*.h5", "*.fits", "*.vcf", "*.tar.gz", "*.txt", "*.lht", "*.fna",
-    "*.*.bt2", "*.fastq", "*.fasta.amb", "*.fasta.sa", "*.fasta.bwt",
-    "*.fasta.pac", "*.fasta.ann", "*.fasta", "*.stf", 
-    "*.out", "*.dot",
-    "SAS", "EAS", "GBR", "AMR", "AFR", "EUR", "ALL", "*.gz"
-  };
 
-//   std::vector<std::string> patterns;
-//   patterns.push_back("*.fits");
-//   patterns.push_back("*.lht");
-//   patterns.push_back("*.out");
-// patterns.push_back("*.stf");
-//   patterns.push_back("*.tar.gz");
-//   patterns.push_back("*.txt");
-//   patterns.push_back("*.vcf");
-// #ifdef INT_DOT
-//   patterns.push_back("*.dot");
-// #endif
-  // patterns.push_back("*.*.bt2");
-  // patterns.push_back("*.fna");
-  // patterns.push_back("*.fastq");
-    // patterns.push_back("*.fasta.amb");
-    // patterns.push_back("*.fasta.sa");
-    // patterns.push_back("*.fasta.bwt");
-    // patterns.push_back("*.fasta.pac");
-    // patterns.push_back("*.fasta.ann");
-    // patterns.push_back("*.fasta");
+
   for (auto pattern: patterns) {
     auto ret_val = fnmatch(pattern.c_str(), fileName, 0);
     if (ret_val == 0) {
@@ -783,21 +702,8 @@ FILE *fopen64(const char *__restrict fileName, const char *__restrict modes) {
   DPRINTF("Calling fopen64 on %s \n", fileName);  
 #endif
   Timer::Metric metric = (modes[0] == 'r') ? Timer::Metric::in_fopen : Timer::Metric::out_fopen;
-  std::vector<std::string> patterns;
-  patterns.push_back("*.fits");
-  patterns.push_back("*.*.bt2");
-  patterns.push_back("*.fna");
-  patterns.push_back("*.fastq");
-  patterns.push_back("*.lht");
-  patterns.push_back("*.out");
-patterns.push_back("*.stf");
-  patterns.push_back("*.tar.gz");
-  // patterns.push_back("*.fasta.amb");
-  // patterns.push_back("*.fasta.sa");
-  // patterns.push_back("*.fasta.bwt");
-  // patterns.push_back("*.fasta.pac");
-  // patterns.push_back("*.fasta.ann");
-  // patterns.push_back("*.fasta");
+
+
   for (auto pattern: patterns) {
     auto ret_val = fnmatch(pattern.c_str(), fileName, 0);
     if (ret_val == 0) {
@@ -806,26 +712,12 @@ patterns.push_back("*.stf");
     }
   }  
 
-    return outerWrapper("fopen64", fileName, metric, monitorFopen, unixfopen64, fileName, modes);
+  return outerWrapper("fopen64", fileName, metric, monitorFopen, unixfopen64, fileName, modes);
 }
 
 int monitorFclose(MonitorFile *file, unsigned int pos, int fd, FILE *fp) {
 #ifdef TRACKFILECHANGES
-  std::vector<std::string> patterns;
-  patterns.push_back("*.fits");
-  patterns.push_back("*.lht");
-  patterns.push_back("*.out");
-  patterns.push_back("*.stf");
-  patterns.push_back("*.tar.gz");
-  // patterns.push_back("*.*.bt2");
-  // patterns.push_back("*.fna");
-  // patterns.push_back("*.fastq");
-  // patterns.push_back("*.fasta.amb");
-  // patterns.push_back("*.fasta.sa");
-  // patterns.push_back("*.fasta.bwt");
-  // patterns.push_back("*.fasta.pac");
-  // patterns.push_back("*.fasta.ann");
-  // patterns.push_back("*.fasta");
+
 
   for (auto pattern: patterns) {
     auto ret_val = fnmatch(pattern.c_str(), file->name().c_str(), 0);
@@ -834,6 +726,7 @@ int monitorFclose(MonitorFile *file, unsigned int pos, int fd, FILE *fp) {
 #ifdef LIBDEBUG
       DPRINTF("Successfully closed a file with fd %d\n", fd);
 #endif
+      break;
     }
   }
 #endif

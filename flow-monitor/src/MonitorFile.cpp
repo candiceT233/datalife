@@ -47,13 +47,6 @@ MonitorFile::MonitorFile(MonitorFile::Type type, std::string name, std::string m
     _fd(fd)
     {
 #ifdef TRACKFILECHANGES
-    std::vector<std::string> patterns = {
-        "*.h5", "*.fits", "*.vcf", "*.tar.gz", "*.txt", "*.lht", "*.fna",
-        "*.*.bt2", "*.fastq", "*.fasta.amb", "*.fasta.sa", "*.fasta.bwt",
-        "*.fasta.pac", "*.fasta.ann", "*.fasta", "*.stf"
-        "*.out", "*.dot",
-        "SAS", "EAS", "GBR", "AMR", "AFR", "EUR", "ALL", "*.gz"
-    };
 
     bool matched = true;
     for (const auto& pattern : patterns) {

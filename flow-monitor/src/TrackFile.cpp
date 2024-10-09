@@ -31,7 +31,7 @@
 #include <chrono>
 
 #include <json.hpp> // for logging json file
-
+#include <limits.h> // for HOST_NAME_MAX
 
 using namespace std::chrono;
 #ifdef LIBDEBUG
@@ -450,8 +450,6 @@ void write_trace_data(const std::string& filename, TraceData& blk_trace_info, co
     file.close();
 }
 
-
-
 void TrackFile::close() {
   // #if 0  
   DPRINTF("Calling TrackFile close \n");
@@ -464,22 +462,24 @@ void TrackFile::close() {
   // }
     // }
 
-  auto pid = std::to_string(getpid());
+    // Get the current host name
+    // Get the current host name
+    char hostname[256]; // Buffer to store the host name
+    std::string host_name = (gethostname(hostname, sizeof(hostname)) == 0) ? hostname : "unknown_host";
+    auto pid = std::to_string(getpid());
   
-  close_file_end_time = high_resolution_clock::now();
-  auto elapsed_time = duration_cast<seconds>(close_file_end_time - open_file_start_time);
-
-
+    close_file_end_time = high_resolution_clock::now();
+    auto elapsed_time = duration_cast<seconds>(close_file_end_time - open_file_start_time);
 
     DPRINTF("Writing r blk access order stat\n");
     // std::string file_name_trace_r = _filename + "_" + pid + "_r_blk_trace";
-    std::string file_name_trace_r = _filename + "." + pid + ".r_blk_trace.json";
+    std::string file_name_trace_r = _filename + "." + pid + "-" + host_name + ".r_blk_trace.json";
     auto& blk_trace_info_r = trace_read_blk_order[_filename];
     auto future_r = std::async(std::launch::async, write_trace_data, file_name_trace_r, std::ref(blk_trace_info_r), pid);
 
     DPRINTF("Writing w blk access order stat\n");
     // std::string file_name_trace_w = _filename + "_" + pid + "_w_blk_trace";
-    std::string file_name_trace_w = _filename + "." + pid + ".w_blk_trace.json";
+    std::string file_name_trace_w = _filename + "." + pid + "-" + host_name + ".w_blk_trace.json";
     auto& blk_trace_info_w = trace_write_blk_order[_filename];
     auto future_w = std::async(std::launch::async, write_trace_data, file_name_trace_w, std::ref(blk_trace_info_w), pid);
 

@@ -98,8 +98,12 @@ Timer::~Timer() {
                 }
             }
         }
+        // Get the current host name
+        char hostname[256]; // Buffer to store the host name
+        std::string host_name = (gethostname(hostname, sizeof(hostname)) == 0) ? hostname : "unknown_host";
+
         // Add task PID to file name 
-        std::string jsonOutputFileName = "monitor_timer." + std::to_string(getpid()) + ".datalife.json";
+        std::string jsonOutputFileName = "monitor_timer." + std::to_string(getpid()) + "-" + host_name + ".datalife.json";
         std::ofstream log_file(jsonOutputFileName, std::ios::out | std::ios::app); // append
         // std::ofstream log_file("monitor_timer.datalife.json", std::ios::out | std::ios::trunc); // overwrite
         if (!log_file) {

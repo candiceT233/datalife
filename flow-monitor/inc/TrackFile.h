@@ -18,6 +18,7 @@ extern std::map<std::string, std::map<int, std::atomic<int64_t> > > track_file_b
 #endif
 
 // For tracing
+extern const std::vector<std::string> patterns;
 extern std::map<std::string, std::vector<int> > trace_read_blk_seq;
 extern std::map<std::string, std::vector<int> > trace_write_blk_seq;
 
@@ -40,6 +41,9 @@ public:
   ssize_t write(const void *buf, size_t count, uint32_t index = 0);
   off_t seek(off_t offset, int whence, uint32_t index = 0);
   int vfprintf(unsigned int pos, int count);
+  // size_t fwrite(const void *ptr, size_t size, size_t count, uint32_t index = 0);  // Candice added fwrite method
+
+  // size_t fwrite(const void *ptr, size_t size, size_t count, FILE *stream);
 
 private:
 // bool trackRead(size_t count, uint32_t index, uint32_t startBlock, uint32_t endBlock);

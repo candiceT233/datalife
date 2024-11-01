@@ -13,6 +13,9 @@ typedef ssize_t (*unixwrite_t)(int fd, const void *buf, size_t count);
 typedef ssize_t (*unixlseek_t)(int fd, off_t offset, int whence);
 typedef off64_t (*unixlseek64_t)(int fd, off64_t offset, int whence);
 
+// Define the function pointer type for lstat
+typedef int (*unixlstat_t)(int version, const char *filename, struct stat *buf); // candice
+
 typedef int (*unixxstat_t)(int version, const char *filename, struct stat *buf);
 typedef int (*unixxstat64_t)(int version, const char *filename, struct stat64 *buf);
 

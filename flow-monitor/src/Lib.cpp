@@ -118,6 +118,7 @@ void __attribute__((constructor)) monitorInit(void) {
         unixread = (unixread_t)dlsym(RTLD_NEXT, "read");
         unixwrite = (unixwrite_t)dlsym(RTLD_NEXT, "write");
         unixlseek = (unixlseek_t)dlsym(RTLD_NEXT, "lseek");
+        unixlstat = (unixlstat_t)dlsym(RTLD_NEXT, "lstat"); // Candice added
         unixlseek64 = (unixlseek64_t)dlsym(RTLD_NEXT, "lseek64");
         unixxstat = (unixxstat_t)dlsym(RTLD_NEXT, "__xstat");
         unixxstat64 = (unixxstat64_t)dlsym(RTLD_NEXT, "__xstat64");
@@ -212,22 +213,24 @@ int removeStr(char *s, const char *r) {
 
 int trackFileOpen(std::string name, std::string metaName, MonitorFile::Type type, const char *pathname, int flags, int mode) {
 
-  // Add O_CREAT if file creation is happens
-  if (flags & O_RDWR && !(flags & O_CREAT)) {
-    DPRINTF("Adding O_CREAT flag to open call.\n");
-    flags |= O_CREAT;
-  }
+  // // Add O_CREAT if file creation is happens
+  // if (flags & O_RDWR && !(flags & O_CREAT)) {
+  //   DPRINTF("Adding O_CREAT flag to open call.\n");
+  //   flags |= O_CREAT;
+  // }
+
+  flags |= O_CREAT; // FIXME: force create, particularly for HDF5 and netCDF files
 
 #ifdef LIBDEBUG
   DPRINTF("trackfileOpen: %s %s %u\n", name.c_str(), metaName.c_str(), type);
 #endif
-  auto fd = (*unixopen64)(name.c_str(), flags, mode);
+  auto fd = (*unixopen)(name.c_str(), flags, mode);
   if (fd >= 0) {  
     MonitorFile *file = MonitorFile::addNewMonitorFile(type, name, name, fd, true);
     if (file) {
       MonitorFileDescriptor::addMonitorFileDescriptor(fd, file, file->newFilePosIndex());
 #ifdef LIBDEBUG
-      DPRINTF("trackFileOpen add new  file success: %s , fd = %d\n", pathname, fd);
+      DPRINTF("trackFileOpen add new file success: %s , fd = %d\n", pathname, fd);
 #endif
     } 
   } else {
@@ -505,7 +508,9 @@ ssize_t write(int fd, const void *buf, size_t count) {
 
 template <typename T>
 T monitorLseek(MonitorFile *file, unsigned int fp, int fd, T offset, int whence) {
-    return (T)file->seek(offset, whence, fp);
+    auto ret = (T)file->seek(offset, whence, fp);
+    timer->addAmt(Timer::MetricType::monitor, Timer::Metric::seek, ret);
+    return ret;
 }
 
 off_t lseek(int fd, off_t offset, int whence) ADD_THROW {
@@ -528,6 +533,10 @@ int innerStat(int version, const char *filename, struct stat *buf) { return whic
 thread_local unixxstat64_t whichStat64 = NULL;
 int innerStat(int version, const char *filename, struct stat64 *buf) { return whichStat64(version, filename, buf); }
 
+thread_local unixlstat_t whichLstat = NULL; // Candice added
+// int innerStat(int version, const char *filename, struct stat *buf) { return whichLstat(version, filename, buf); }
+
+
 template <typename T>
 int monitorStat(std::string name, std::string metaName, MonitorFile::Type type, int version, const char *filename, T *buf) {
 #ifdef LIBDEBUG
@@ -545,28 +554,18 @@ int monitorStat(std::string name, std::string metaName, MonitorFile::Type type, 
     }
 
     int fd = (*unixopen)(metaName.c_str(), O_RDONLY, 0);
-    /*if(type == MonitorFile::Type::Input) {
-      InputFile tempFile(name, metaName, fd, false);
-      buf->st_size = tempFile.fileSize();
-    }
-    else if(type == MonitorFile::Type::Local) {
-      int urlSize = supportedUrlType(name) ? sizeUrlPath(name) : -1;
-      if(urlSize > -1) {
-	if(Config::downloadForSize)
-	  buf->st_size = urlSize;
-	else if(urlSize == 0)
-	  buf->st_size = 1;
-      }
-      else {
-	LocalFile tempFile(name, metaName, fd, false);
-	buf->st_size = tempFile.fileSize();
-      }
-    }*/
     (*unixclose)(fd);
   }
 
   return ret;
 }
+
+// Candice added
+int lstat(int version, const char *filename, struct stat *buf) ADD_THROW {
+    whichLstat = unixlstat;
+    return outerWrapper("lstat", filename, Timer::Metric::stat, monitorStat<struct stat>, unixlstat, version, filename, buf);
+}
+
 
 int __xstat(int version, const char *filename, struct stat *buf) ADD_THROW {
     whichStat = unixxstat;
@@ -747,6 +746,7 @@ int fclose(FILE *fp) {
 }
 
 size_t monitorFread(MonitorFile *file, unsigned int pos, int fd, void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp) {
+    DPRINTF("fread Invoking monitorFread\n");
     auto read_bytes = (size_t)file->read(ptr, size * n, pos);
     timer->addAmt(Timer::MetricType::monitor, Timer::Metric::read, read_bytes); // candice: removed
     if (read_bytes >= size){return n;}
@@ -759,34 +759,58 @@ size_t fread(void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp) {
 #endif
   auto ret_val = outerWrapper("fread", fp, Timer::Metric::read, 
 			      monitorFread, unixfread, ptr, size, n, fp);
+
+  // auto ret_val = outerWrapper("fread", fp, Timer::Metric::read, 
+	// 		      monitorRead, unixfread, ptr, size, n, fp);
 #ifdef LIBDEBUG
   DPRINTF("fread return value %d\n", ret_val);
 #endif
   return ret_val;
 }
 
-size_t monitorFwrite(MonitorFile *file, unsigned int pos, int fd, const void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp) {
+ssize_t monitorFwrite(MonitorFile *file, unsigned int pos, const void *__restrict ptr, size_t total_bytes) {
 #ifdef LIBDEBUG
-    // DPRINTF("Invoking fwrite %d %d \n", size * n, fd);
+    DPRINTF("Invoking monitorFwrite %zu bytes\n", total_bytes);
 #endif
-    auto written_bytes = (size_t)file->write(ptr, size * n, pos);
-    timer->addAmt(Timer::MetricType::monitor, Timer::Metric::write, written_bytes); // candice: removed
-    if (written_bytes >= size) return n;
-    else return (size_t) (size / n);
+    auto written_bytes = file->write(ptr, total_bytes, pos);
+    timer->addAmt(Timer::MetricType::monitor, Timer::Metric::write, written_bytes);
+    return written_bytes;
 }
 
 size_t fwrite(const void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp) {
-#ifdef LIBDEBUG
-  printf("fwrite Invoking fwrite\n");
-#endif
-    //return outerWrapper("fwrite", fp, Timer::Metric::read, monitorFwrite, unixfwrite, ptr, size, n, fp);
-    auto ret_val = outerWrapper("fwrite", fp, Timer::Metric::write, 
-              monitorFwrite, unixfwrite, ptr, size, n, fp);
-#ifdef LIBDEBUG
-  DPRINTF("fwrite return value %d\n", ret_val);
-#endif
-  return ret_val;
+    MonitorFile *file = lookUpMonitorFile(filename);
+    unsigned int pos = static_cast<unsigned int>(ftell(fp));
+    size_t total_bytes = size * n;
+
+    auto ret_val = outerWrapper("fwrite", fp, Timer::Metric::write, monitorFwrite, unixfwrite, file, pos, ptr, total_bytes);
+    return ret_val / size;
 }
+
+// size_t monitorFwrite(MonitorFile *file, unsigned int pos, int fd, const void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp) {
+// #ifdef LIBDEBUG
+//     DPRINTF("Invoking monitorFwrite %d %d \n", size * n, fd);
+// #endif
+//     auto written_bytes = (size_t)file->write(ptr, size * n, pos);
+//     timer->addAmt(Timer::MetricType::monitor, Timer::Metric::write, written_bytes); // candice: removed
+//     if (written_bytes >= size) return n;
+//     else return (size_t) (size / n);
+// }
+
+// size_t fwrite(const void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp) {
+// #ifdef LIBDEBUG
+//   printf("fwrite Invoking fwrite\n");
+// #endif
+//   // int fd = fileno(fp);
+//     //return outerWrapper("fwrite", fp, Timer::Metric::read, monitorFwrite, unixfwrite, ptr, size, n, fp);
+//     auto ret_val = outerWrapper("fwrite", fp, Timer::Metric::write, monitorFwrite, unixfwrite, ptr, size, n, fp);
+//     // auto ret_val = outerWrapper("fwrite", fp, Timer::Metric::write, monitorWrite, unixfwrite, fileno(fp), ptr, size * n);
+
+// #ifdef LIBDEBUG
+//   DPRINTF("fwrite return value %d\n", ret_val);
+// #endif
+//   return ret_val;
+// }
+
 
 int monitorVfprintf(MonitorFile *file, unsigned int pos, int fd, FILE * stream, 
 		     const char * format, ...) {

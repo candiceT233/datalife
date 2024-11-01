@@ -239,8 +239,8 @@ ssize_t TrackFile::write(const void *buf, size_t count, uint32_t index) {
   DPRINTF("In trackfile write count %u \n", count); // read start time
   auto write_file_start_time = high_resolution_clock::now();
   unixwrite_t unixWrite = (unixwrite_t)dlsym(RTLD_NEXT, "write");
-  DPRINTF("About to write %u count to file with fd %d and file_name: %s\n", 
-	  count, _fd_orig, _filename.c_str());
+  DPRINTF("About to write %u count to file with index %d fd %d and file_name: %s\n", 
+	  count, index, _fd_orig, _filename.c_str());
   auto bytes_written = (*unixWrite)(_fd_orig, buf, count);
   // DPRINTF("bytes_written: %ld _fd_orig: %d _name: %s \n", bytes_written, _fd_orig, _name.c_str());
   auto write_file_end_time = high_resolution_clock::now();
@@ -253,7 +253,6 @@ ssize_t TrackFile::write(const void *buf, size_t count, uint32_t index) {
     auto& trace_vector = trace_write_blk_order[_name];
     trace_vector.push_back(start_block);
     trace_vector.push_back(end_block);
-
 #else
 
   auto start_block = _filePos[index] / BLK_SIZE;
@@ -275,6 +274,8 @@ ssize_t TrackFile::write(const void *buf, size_t count, uint32_t index) {
   // Update the first and second values in trace_vector
   trace_vector[0] = start_block;
   trace_vector[1] = end_block;
+
+  DPRINTF("TrackFile::write() recording start_block[%d] end_block[%d]", start_block, end_block);
 
   // Determine the status (-1 or -2)
   if (prev_start_block != -1 && prev_end_block != -1 && !has_been_random) {
@@ -419,9 +420,13 @@ off_t TrackFile::seek(off_t offset, int whence, uint32_t index) {
 }
 
 void write_trace_data(const std::string& filename, TraceData& blk_trace_info, const std::string& pid) {
-    if (blk_trace_info.empty()) {
-        return;  // Do nothing if blk_trace_info is empty
-    }
+  DPRINTF("write_trace_data(): writing to %s", filename.c_str());
+
+    // if (blk_trace_info.empty()) {
+    //   DPRINTF("write_trace_data(): blk_trace_info is empty");
+    //   return;  // Do nothing if blk_trace_info is empty
+    // }
+    
 
     // Create JSON object
     nlohmann::json jsonOutput;
@@ -447,23 +452,13 @@ void write_trace_data(const std::string& filename, TraceData& blk_trace_info, co
         return;
     }
     file << jsonOutput.dump(4); // Pretty print with an indent of 4 spaces
+    DPRINTF("write_trace_data(): blk_trace_info written to file %s", filename);
     file.close();
 }
 
 void TrackFile::close() {
   // #if 0  
   DPRINTF("Calling TrackFile close \n");
-  // if (!_closed) {
-  // unixclose_t unixClose = (unixclose_t)dlsym(RTLD_NEXT, "close");
-  // auto close_success = (*unixClose)(_fd_orig);
-  // if (close_success) {
-  //   // _closed = true;
-  //   DPRINTF("Closed file with fd %d with name %s successfully\n", _fd_orig, _name.c_str());
-  // }
-    // }
-
-    // Get the current host name
-    // Get the current host name
     char hostname[256]; // Buffer to store the host name
     std::string host_name = (gethostname(hostname, sizeof(hostname)) == 0) ? hostname : "unknown_host";
     auto pid = std::to_string(getpid());
@@ -471,13 +466,13 @@ void TrackFile::close() {
     close_file_end_time = high_resolution_clock::now();
     auto elapsed_time = duration_cast<seconds>(close_file_end_time - open_file_start_time);
 
-    DPRINTF("Writing r blk access order stat\n");
+    DPRINTF("Writing r blk access order stat with prefix %s\n", _filename.c_str());
     // std::string file_name_trace_r = _filename + "_" + pid + "_r_blk_trace";
     std::string file_name_trace_r = _filename + "." + pid + "-" + host_name + ".r_blk_trace.json";
     auto& blk_trace_info_r = trace_read_blk_order[_filename];
     auto future_r = std::async(std::launch::async, write_trace_data, file_name_trace_r, std::ref(blk_trace_info_r), pid);
 
-    DPRINTF("Writing w blk access order stat\n");
+    DPRINTF("Writing w blk access order stat with prefix %s\n", _filename.c_str());
     // std::string file_name_trace_w = _filename + "_" + pid + "_w_blk_trace";
     std::string file_name_trace_w = _filename + "." + pid + "-" + host_name + ".w_blk_trace.json";
     auto& blk_trace_info_w = trace_write_blk_order[_filename];
@@ -486,8 +481,6 @@ void TrackFile::close() {
     // Wait for both async tasks to complete
     future_r.get();
     future_w.get();
-
-
 
 #ifdef GATHERSTAT
    // write blk access stat in a file

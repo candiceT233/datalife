@@ -255,6 +255,24 @@ void MonitorFile::setFilePos(uint32_t index, uint64_t pos) {
 
 //fileName is the metafile
 MonitorFile *MonitorFile::addNewMonitorFile(MonitorFile::Type type, std::string fileName, std::string metaName, int fd, bool open) {
+    if (type == MonitorFile::TrackLocal) {
+      DPRINTF("Trackfile going to be added to the Trackable \n");
+        return Trackable<std::string, MonitorFile *>::AddTrackable(
+            fileName, [=]() -> MonitorFile * {
+	      DPRINTF("Filename in lambda %s\n", fileName.c_str());
+                MonitorFile *temp = new TrackFile(fileName, fd, open);
+                if (open && temp && temp->active() == 0) {
+                    delete temp;
+		    DPRINTF("Can't add a TrackFile with Filename %s fd %d", 
+			    fileName.c_str(), fd);
+		    return NULL;
+                }
+		DPRINTF("Adding (filename,Trackfile) to map\n");
+                return temp;
+            });
+    }  
+    return NULL;
+
    /* if (type == MonitorFile::Input) {
         return Trackable<std::string, MonitorFile *>::AddTrackable(
             metaName, [=]() -> MonitorFile * {
@@ -301,23 +319,7 @@ MonitorFile *MonitorFile::addNewMonitorFile(MonitorFile::Type type, std::string 
                 }
                 return temp;
             });
-    } else*/ if (type == MonitorFile::TrackLocal) {
-      DPRINTF("Trackfile going to be added to the Trackable \n");
-        return Trackable<std::string, MonitorFile *>::AddTrackable(
-            fileName, [=]() -> MonitorFile * {
-	      DPRINTF("Filename in lambda %s\n", fileName.c_str());
-                MonitorFile *temp = new TrackFile(fileName, fd, open);
-                if (open && temp && temp->active() == 0) {
-                    delete temp;
-		    DPRINTF("Can't add a TrackFile with Filename %s fd %d", 
-			    fileName.c_str(), fd);
-		    return NULL;
-                }
-		DPRINTF("Adding (filename,Trackfile) to map\n");
-                return temp;
-            });
-    }  
-    return NULL;
+    } else*/ 
 }
 
 //fileName is the metaFile

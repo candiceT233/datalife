@@ -43,6 +43,15 @@
 
 #define TRACKFILECHANGES 1
 
+const std::vector<std::string> patterns = {
+    "*.h5", "*.nc", "*.fits", "*.vcf", "*.tar.gz", "*.lht", "*.fna",
+    "*.*.bt2", "*.fastq", "*.fasta.amb", "*.fasta.sa", "*.fasta.bwt",
+    "*.fasta.pac", "*.fasta.ann", "*.fasta", "*.stf",
+    "*.out", "*.dot", "*.gz", "*.dcd", "*.pt", "embeddings*.h5"
+    //"*.pdb",
+    // "SAS", "EAS", "GBR", "AMR", "AFR", "EUR", "ALL",
+};
+
 static Timer* timer;
 
 std::once_flag log_flag;
@@ -83,6 +92,7 @@ unixclose_t unixclose = NULL;
 unixread_t unixread = NULL;
 unixwrite_t unixwrite = NULL;
 unixlseek_t unixlseek = NULL;
+unixlstat_t unixlstat = NULL;
 unixlseek64_t unixlseek64 = NULL;
 unixxstat_t unixxstat = NULL;
 unixxstat64_t unixxstat64 = NULL;
@@ -268,29 +278,6 @@ inline auto innerWrapper(const char *pathname, bool &isMonitorFile, Func monitor
     return posixFun(args...);
   }
 
-  std::vector<std::string> patterns;
-  patterns.push_back("*.fits");
-  patterns.push_back("*.h5");
-  patterns.push_back("*.vcf");
-  patterns.push_back("*.fna");
-  patterns.push_back("*.*.bt2");
-  patterns.push_back("*.fastaq");
-  patterns.push_back("*.gz");
-  patterns.push_back("*.txt");
-  patterns.push_back("*.dot");
-  patterns.push_back("*.lht");
-  patterns.push_back("*.out");
-  patterns.push_back("*.stf");
-  patterns.push_back("*.fasta.amb");
-  patterns.push_back("*.fasta.sa");
-  patterns.push_back("*.fasta.bwt");
-  patterns.push_back("*.fasta.pac");
-  patterns.push_back("*.fasta.ann");
-  patterns.push_back("*.fasta");
-#ifdef INT_DOT
-  patterns.push_back("*.dot");
-#endif
-
   for (auto pattern: patterns) {
     auto ret_val = fnmatch(pattern.c_str(), pathname, 0);
     // DPRINTF("PATTERN: %s PATHNAME: %s \n", pattern.c_str(), pathname);
@@ -445,7 +432,10 @@ int fclose(FILE *fp);
 size_t monitorFread(MonitorFile *file, unsigned int pos, int fd, void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp);
 size_t fread(void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp);
 
-size_t monitorFwrite(MonitorFile *file, unsigned int pos, int fd, const void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp);
+// size_t monitorFwrite(MonitorFile *file, unsigned int pos, int fd, const void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp);
+// size_t fwrite(const void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp);
+
+ssize_t monitorFwrite(MonitorFile *file, unsigned int pos, const void *__restrict ptr, size_t total_bytes);
 size_t fwrite(const void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp);
 
 long int monitorFtell(MonitorFile *file, unsigned int pos, int fd, FILE *fp);

@@ -120,15 +120,19 @@ void TrackFile::open() {
 
 }
 
-ssize_t TrackFile::read(void *buf, size_t count, uint32_t index) {
-  DPRINTF("In trackfile read count %u \n", count); // read start time
-  auto read_file_start_time = high_resolution_clock::now();
-  unixread_t unixRead = (unixread_t)dlsym(RTLD_NEXT, "read");
-  auto bytes_read = (*unixRead)(_fd_orig, buf, count);
-  auto read_file_end_time = high_resolution_clock::now();
-  auto duration = duration_cast<seconds>(read_file_end_time - read_file_start_time); 
-  total_time_spent_read += duration;
-  // DPRINTF("bytes_read: %ld _fd_orig: %d _name: %s \n", bytes_read, _fd_orig, _name.c_str());
+/*POSIX starts */
+ssize_t TrackFile::read(void *buf, size_t count, uint32_t index, off_t offset) {
+    auto start_time = high_resolution_clock::now();
+    unixread_t unixRead = (unixread_t)dlsym(RTLD_NEXT, offset == -1 ? "read" : "pread");
+
+    // Handle offset for `pread`
+    ssize_t bytes_read = (offset == -1)
+        ? (*unixRead)(_fd_orig, buf, count)
+        : ((unixpread_t)unixRead)(_fd_orig, buf, count, offset);
+
+    total_time_spent_read += duration_cast<seconds>(high_resolution_clock::now() - start_time);
+
+    DPRINTF("bytes_read: %ld _fd_orig: %d _name: %s\n", bytes_read, _fd_orig, _name.c_str());
 
 #ifdef BLK_IDX
     auto start_block = _filePos[index] / BLK_SIZE;
@@ -138,114 +142,160 @@ ssize_t TrackFile::read(void *buf, size_t count, uint32_t index) {
     trace_vector.push_back(end_block);
 
 #else
-    auto start_block = _filePos[index] / BLK_SIZE;
-    auto end_block = (_filePos[index] + count) / BLK_SIZE;
+  // Determine the start and end blocks based on the file position
+  auto start_block = _filePos[index] / BLK_SIZE;
+  auto end_block = (_filePos[index] + count) / BLK_SIZE;
 
-    if (first_access_block == -1){
-        first_access_block = start_block;
-    } 
+  // Initialize first_access_block if not already set
+  if (first_access_block == -1) {
+      first_access_block = start_block;
+  }
 
-    // Retrieve the trace vector for the current file
-    auto& trace_vector = trace_read_blk_order[_name];
+  // Update largest_access_block
+  if (largest_access_block < end_block) {
+      largest_access_block = end_block;
+  }
 
-    // Check if trace_vector has at least 3 elements
-    if (trace_vector.size() < 3) {
-        // Initialize vector if it does not have enough elements
-        trace_vector.resize(3, -2); // Default to -2
-    }
+  // Retrieve the trace vector for the current file
+  auto& trace_vector = trace_read_blk_order[_name];
 
-    // Update the first and second values in trace_vector
-    trace_vector[0] = start_block;
-    trace_vector[1] = end_block;
+  // Ensure trace_vector has at least 4 elements
+  if (trace_vector.size() < 4) {
+      // Initialize vector if it does not have enough elements
+      trace_vector.resize(4, -2); // Default to -2
+  }
 
-    // Determine the status (-1 or -2)
-    if (prev_start_block != -1 && prev_end_block != -1 && !has_been_random) {
-        if (start_block >= prev_end_block) {
-            // Sequential: store -1
-            trace_vector[2] = -1;
-            // Update previous blocks
-            prev_start_block = start_block;
-            prev_end_block = end_block;
-        } else {
-            // Random: store -2 and flag to stop further checks
-            trace_vector[2] = -2;
-            has_been_random = true;
-        }
-    } else {
-        // No previous blocks to compare or already flagged as random
-        if (prev_start_block == -1 && prev_end_block == -1) {
-            // First block
-            trace_vector[2] = -1;
-            prev_start_block = start_block;
-            prev_end_block = end_block;
-        } else {
-            // No valid previous blocks for comparison
-            trace_vector[2] = -2;
-        }
-    }
+  // Update the first and second values in trace_vector
+  trace_vector[0] = start_block;
+  trace_vector[1] = end_block;
+
+  // Store largest_access_block in trace_vector[2]
+  trace_vector[2] = largest_access_block;
+
+  DPRINTF("TrackFile::read() recording start_block[%d] end_block[%d] largest_access_block[%d]", 
+          start_block, end_block, largest_access_block);
+
+  // Determine the sequential/random status and store it in trace_vector[3]
+  if (prev_start_block != -1 && prev_end_block != -1 && !has_been_random) {
+      if (start_block >= prev_end_block) {
+          // Sequential: store -1 in trace_vector[3]
+          trace_vector[3] = -1;
+          // Update previous blocks
+          prev_start_block = start_block;
+          prev_end_block = end_block;
+      } else {
+          // Random: store -2 in trace_vector[3] and flag to stop further checks
+          trace_vector[3] = -2;
+          has_been_random = true;
+      }
+  } else {
+      // No previous blocks to compare or already flagged as random
+      if (prev_start_block == -1 && prev_end_block == -1) {
+          // First block
+          trace_vector[3] = -1;
+          prev_start_block = start_block;
+          prev_end_block = end_block;
+      } else {
+          // No valid previous blocks for comparison
+          trace_vector[3] = -2;
+      }
+  }
+
+  DPRINTF("TrackFile::read() updated trace_vector: start_block[%d], end_block[%d], largest_access_block[%d], status[%d]", 
+          trace_vector[0], trace_vector[1], trace_vector[2], trace_vector[3]);
 #endif
 
 #ifdef GATHERSTAT
-  if (bytes_read != -1) { // Only update stats if nonzero byte counts are read
-    auto blockSizeForStat = Config::blockSizeForStat;
-    auto diff = _filePos[index]; //- _filePos[0]; // technically index is always equal to 0 for us, assuming there is only one fp for a file open at a time.
-    auto precNumBlocks = diff / blockSizeForStat;
-    uint32_t startBlockForStat = precNumBlocks; 
-    uint32_t endBlockForStat = (diff + bytes_read) / blockSizeForStat;
-  
-    if (((diff + bytes_read) % blockSizeForStat)) {
-      endBlockForStat++;
-    }
-    DPRINTF("bytes_read: %d; startBlockForStat: %d; endBlockForStat: %d; blockSizeForStat: %d", bytes_read, startBlockForStat, endBlockForStat, blockSizeForStat);
+    if (bytes_read > -1) {
+        auto blockSize = Config::blockSizeForStat;
+        auto file_pos = (offset == -1) ? _filePos[index] : offset; // Use offset for `pread`
+        uint32_t start_block = file_pos / blockSize;
+        uint32_t end_block = (file_pos + bytes_read) / blockSize;
 
-    for (auto i = startBlockForStat; i <= endBlockForStat; i++) {
-      auto index = i;
+        DPRINTF("bytes_read: %ld; start_block: %u; end_block: %u; blockSize: %u\n",
+                bytes_read, start_block, end_block, blockSize);
+
+        for (uint32_t block = start_block; block <= end_block; ++block) {
 #ifdef USE_HASH
-      auto sample = hashed(index) % Config::hashtableSizeForStat;
-      if (sample < Config::hashtableSizeForStat/2) { // Sample only 50%
-	// index = sample;
-#endif      
-	if (track_file_blk_r_stat[_name].find(index) == 
-	    track_file_blk_r_stat[_name].end()) {
-	  track_file_blk_r_stat[_name].insert(std::make_pair(index, 1));
-	//track_file_blk_r_stat_size[_name].insert(std::make_pair(i, bytes_read - ((i - startBlockForStat) * blockSizeForStat)));
-	  track_file_blk_r_stat_size[_name].insert(std::make_pair(index, bytes_read));
-	} else {
-	  track_file_blk_r_stat[_name][index]++;
-	}
-	// For tracing order
-	trace_read_blk_seq[_name].push_back(index);
+            auto sample = hashed(block) % Config::hashtableSizeForStat;
+            if (sample >= Config::hashtableSizeForStat / 2) continue;
+#endif
+            auto &block_stat = track_file_blk_r_stat[_name];
+            auto &block_stat_size = track_file_blk_r_stat_size[_name];
 
-#ifdef USE_HASH    
-      } else {
-	continue;
-      }
-#endif
+            if (block_stat.find(block) == block_stat.end()) {
+                block_stat[block] = 1;
+                block_stat_size[block] = std::min(bytes_read - (block * blockSize), blockSize);
+            } else {
+                block_stat[block]++;
+            }
+            trace_read_blk_seq[_name].push_back(block);
+        }
     }
-  }
 #endif
-  if (bytes_read != -1) {
-    DPRINTF("Successfully read the TrackFile\n");
-    _filePos[index] += bytes_read;
-  }
+
+    if (bytes_read != -1) {
+        DPRINTF("Successfully read the TrackFile\n");
+        if (offset == -1) {
+            _filePos[index] += bytes_read; // Only update file position for `read`
+        }
+    }
+
 #ifdef WRITE_STAT_EACH
-  close();
+    close();
 #endif
-  return bytes_read; // // read end time
-  //  return 0;
+
+    return bytes_read;
 }
 
-ssize_t TrackFile::write(const void *buf, size_t count, uint32_t index) {
-  DPRINTF("In trackfile write count %u \n", count); // read start time
-  auto write_file_start_time = high_resolution_clock::now();
-  unixwrite_t unixWrite = (unixwrite_t)dlsym(RTLD_NEXT, "write");
-  DPRINTF("About to write %u count to file with index %d fd %d and file_name: %s\n", 
-	  count, index, _fd_orig, _filename.c_str());
-  auto bytes_written = (*unixWrite)(_fd_orig, buf, count);
-  // DPRINTF("bytes_written: %ld _fd_orig: %d _name: %s \n", bytes_written, _fd_orig, _name.c_str());
-  auto write_file_end_time = high_resolution_clock::now();
-  auto duration = duration_cast<seconds>(write_file_end_time - write_file_start_time);
-  total_time_spent_write += duration;
+ssize_t TrackFile::write(const void *buf, size_t count, uint32_t filePosIndex) {
+    DPRINTF("TrackFile::write with count=%zu, filePosIndex=%u\n", count, filePosIndex);
+
+    // Dynamically load the original write function
+    unixwrite_t unixWrite = (unixwrite_t)dlsym(RTLD_NEXT, "write");
+
+    // Perform the write
+    auto bytes_written = (*unixWrite)(_fd_orig, buf, count);
+    if (bytes_written < 0) {
+        perror("TrackFile::write failed");
+        return bytes_written;
+    }
+
+    // Update file position tracking
+    _filePos[filePosIndex] += bytes_written;
+
+    return bytes_written;
+}
+
+
+
+ssize_t TrackFile::write(const void *buf, size_t count, uint32_t index, off_t offset) {
+    DPRINTF("In TrackFile::write with count: %u\n", count);
+
+    auto start_time = high_resolution_clock::now();
+
+    // Use the appropriate system call based on the offset
+    ssize_t bytes_written;
+    if (offset >= 0) {
+        // Use pwrite for positional writes
+        unixpwrite_t unixPwrite = (unixpwrite_t)dlsym(RTLD_NEXT, "pwrite");
+        bytes_written = (*unixPwrite)(_fd_orig, buf, count, offset);
+        DPRINTF("Performing pwrite: offset=%ld\n", offset);
+    } else {
+        // Use write for sequential writes
+        unixwrite_t unixWrite = (unixwrite_t)dlsym(RTLD_NEXT, "write");
+        bytes_written = (*unixWrite)(_fd_orig, buf, count);
+    }
+
+    if (bytes_written < 0) {
+        perror("Write failed");
+        return bytes_written;
+    }
+
+    auto end_time = high_resolution_clock::now();
+    total_time_spent_write += duration_cast<seconds>(end_time - start_time);
+
+    DPRINTF("Bytes written: %ld, FD: %d, File: %s\n", bytes_written, _fd_orig, _name.c_str());
 
 #ifdef BLK_IDX
     auto start_block = _filePos[index] / BLK_SIZE;
@@ -254,101 +304,104 @@ ssize_t TrackFile::write(const void *buf, size_t count, uint32_t index) {
     trace_vector.push_back(start_block);
     trace_vector.push_back(end_block);
 #else
-
+  // Determine the start and end blocks based on the file position
   auto start_block = _filePos[index] / BLK_SIZE;
   auto end_block = (_filePos[index] + count) / BLK_SIZE;
 
-  if (first_access_block == -1){
-    first_access_block = start_block;
-  } 
+  // Initialize first_access_block if not already set
+  if (first_access_block == -1) {
+      first_access_block = start_block;
+  }
+
+  // Update largest_access_block
+  if (largest_access_block < end_block) {
+      largest_access_block = end_block;
+  }
 
   // Retrieve the trace vector for the current file
   auto& trace_vector = trace_write_blk_order[_name];
 
-  // Check if trace_vector has at least 3 elements
-  if (trace_vector.size() < 3) {
+  // Ensure trace_vector has at least 4 elements
+  if (trace_vector.size() < 4) {
       // Initialize vector if it does not have enough elements
-      trace_vector.resize(3, -2); // Default to -2
+      trace_vector.resize(4, -2); // Default to -2
   }
 
   // Update the first and second values in trace_vector
   trace_vector[0] = start_block;
   trace_vector[1] = end_block;
 
-  DPRINTF("TrackFile::write() recording start_block[%d] end_block[%d]", start_block, end_block);
+  // Store largest_access_block in trace_vector[2]
+  trace_vector[2] = largest_access_block;
 
-  // Determine the status (-1 or -2)
+  DPRINTF("TrackFile::write() recording start_block[%d] end_block[%d] largest_access_block[%d]", 
+          start_block, end_block, largest_access_block);
+
+  // Determine the sequential/random status and store it in trace_vector[3]
   if (prev_start_block != -1 && prev_end_block != -1 && !has_been_random) {
       if (start_block >= prev_end_block) {
-          // Sequential: store -1
-          trace_vector[2] = -1;
+          // Sequential: store -1 in trace_vector[3]
+          trace_vector[3] = -1;
           // Update previous blocks
           prev_start_block = start_block;
           prev_end_block = end_block;
       } else {
-          // Random: store -2 and flag to stop further checks
-          trace_vector[2] = -2;
+          // Random: store -2 in trace_vector[3] and flag to stop further checks
+          trace_vector[3] = -2;
           has_been_random = true;
       }
   } else {
       // No previous blocks to compare or already flagged as random
       if (prev_start_block == -1 && prev_end_block == -1) {
           // First block
-          trace_vector[2] = -1;
+          trace_vector[3] = -1;
           prev_start_block = start_block;
           prev_end_block = end_block;
       } else {
           // No valid previous blocks for comparison
-          trace_vector[2] = -2;
+          trace_vector[3] = -2;
       }
   }
+
+  DPRINTF("TrackFile::write() updated trace_vector: start_block[%d], end_block[%d], largest_access_block[%d], status[%d]", 
+          trace_vector[0], trace_vector[1], trace_vector[2], trace_vector[3]);
+
 #endif
 
 #ifdef GATHERSTAT
-  if (bytes_written != -1) {
-    auto diff = _filePos[index]; //  - _filePos[0];
-    auto precNumBlocks = diff / _blkSize;
-    uint32_t startBlockForStat = precNumBlocks; 
-    uint32_t endBlockForStat = (diff + bytes_written) / _blkSize; 
-    if (((diff + bytes_written) % _blkSize)) {
-      endBlockForStat++;
-    }
+    if (bytes_written > 0) {
+        // Determine the file position
+        off_t file_position = (offset >= 0) ? offset : _filePos[index];
+        uint32_t start_block = file_position / _blkSize;
+        uint32_t end_block = (file_position + bytes_written) / _blkSize;
 
-    // DPRINTF("w startBlockForStat: %d endBlockForStat: %d \n", startBlockForStat, endBlockForStat);
-    for (auto i = startBlockForStat; i <= endBlockForStat; i++) {
-      auto index = i;
+        // Update statistics for each block affected by the write
+        for (uint32_t block_index = start_block; block_index <= end_block; ++block_index) {
 #ifdef USE_HASH
-      auto sample = hashed(index) % Config::hashtableSizeForStat;
-      if (sample < Config::hashtableSizeForStat/2) { // Sample only 50%
-	// index = sample;
-#endif      
-	if (track_file_blk_w_stat[_name].find(index) == track_file_blk_w_stat[_name].end()) {
-	  // DPRINTF("%s: 1 \n",_name.c_str());
-	  track_file_blk_w_stat[_name].insert(std::make_pair(index, 1)); // not thread-safe
-	track_file_blk_w_stat_size[_name].insert(std::make_pair(i, bytes_written)); // not thread-safe
-        }
-        else {
-	  // DPRINTF("%s: 2 \n",_name.c_str());
-	  track_file_blk_w_stat[_name][index]++;
-        }
-
-	trace_write_blk_seq[_name].push_back(index);
-
-#ifdef USE_HASH    
-      } else {
-	continue;
-      }
+            auto sample = hashed(block_index) % Config::hashtableSizeForStat;
+            if (sample >= Config::hashtableSizeForStat / 2) continue;
 #endif
+            if (track_file_blk_w_stat[_name].find(block_index) == track_file_blk_w_stat[_name].end()) {
+                track_file_blk_w_stat[_name][block_index] = 1;
+                track_file_blk_w_stat_size[_name][block_index] = 
+                    std::min(bytes_written - (block_index * _blkSize), _blkSize);
+            } else {
+                track_file_blk_w_stat[_name][block_index]++;
+            }
+            trace_write_blk_seq[_name].push_back(block_index);
+        }
     }
-  }
 #endif
-  if (bytes_written != -1) {
-    // DPRINTF("Successfully wrote to the TrackFile\n");
-    _filePos[index] += bytes_written;
-    // _fileSize += bytes_written;  
-  }
-  return bytes_written; // read end time
+
+    if (bytes_written > 0 && offset < 0) {
+        // Update file position tracking only for sequential writes
+        _filePos[index] += bytes_written;
+    }
+
+    return bytes_written;
 }
+
+/*POSIX ends */
 
 int TrackFile::vfprintf(unsigned int pos, int count) {
   DPRINTF("In trackfile vfprintf\n");
@@ -422,10 +475,10 @@ off_t TrackFile::seek(off_t offset, int whence, uint32_t index) {
 void write_trace_data(const std::string& filename, TraceData& blk_trace_info, const std::string& pid) {
   DPRINTF("write_trace_data(): writing to %s", filename.c_str());
 
-    // if (blk_trace_info.empty()) {
-    //   DPRINTF("write_trace_data(): blk_trace_info is empty");
-    //   return;  // Do nothing if blk_trace_info is empty
-    // }
+    if (blk_trace_info.empty()) {
+      DPRINTF("write_trace_data(): blk_trace_info is empty");
+      return;  // Do nothing if blk_trace_info is empty
+    }
     
 
     // Create JSON object
@@ -567,3 +620,5 @@ void TrackFile::close() {
   // #endif
   #endif
 }
+
+

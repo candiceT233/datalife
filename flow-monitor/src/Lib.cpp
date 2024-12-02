@@ -43,16 +43,18 @@
 #include <cassert>
 #include <errno.h>
 
-
-#define DPRINTF(...) fprintf(stderr, __VA_ARGS__)
-// #define DPRINTF(...)
+// #define printf(...) fprintf(stderr, __VA_ARGS__)
+#ifdef LIBDEBUG
+#define printf(...) fprintf(stderr, __VA_ARGS__)
+#else
+#define printf(...)
+#endif
 #define MONITOR_ID "MONITOR"
 #define MONITOR_ID_LEN 5 
 #define MONITOR_VERSION "0.1"
 #define MONITOR_VERSION_LEN 3 //5+3
 
-#define TRACKFILECHANGES 1 // tmp-ly added
-
+// #define TRACKFILECHANGES 1 // tmp-ly added
 
 class CleanupTrackFile {
 public:
@@ -68,6 +70,7 @@ public:
     auto fd_ = next_iter->first;
     auto file_desc = next_iter->second;
     auto file = file_desc->getFile();
+    DPRINTF("Lib.cpp: Calling CleanupTrackFile() \n");
     file->close();
     MonitorFile::removeMonitorFile(file);
     MonitorFileDescriptor::removeMonitorFileDescriptor(fd_);
@@ -75,15 +78,11 @@ public:
   }
 };
 
-
 void __attribute__((constructor)) monitorInit(void) {
     std::call_once(log_flag, []() {
         timer = new Timer();
 
         timer->start();
-
-        // printf("Timestamp[monitorInit]: %ld\n", timer->getCurrentTime()); // candice added
-
         Loggable::mtx_cout = new std::mutex();
         //InputFile::_time_of_last_read = new std::chrono::time_point<std::chrono::high_resolution_clock>();
         //InputFile::_cache = new Cache(BASECACHENAME, CacheType::base);
@@ -104,7 +103,7 @@ void __attribute__((constructor)) monitorInit(void) {
             while (!files.eof()) {
                 std::string f;
                 getline(files, f, ' ');
-                printf("%s\n",f.c_str());
+                DPRINTF("Lib.cpp: %s\n",f.c_str());
                 track_files->insert(f);
             }
         }
@@ -118,8 +117,8 @@ void __attribute__((constructor)) monitorInit(void) {
         unixread = (unixread_t)dlsym(RTLD_NEXT, "read");
         unixwrite = (unixwrite_t)dlsym(RTLD_NEXT, "write");
         unixlseek = (unixlseek_t)dlsym(RTLD_NEXT, "lseek");
-        unixlstat = (unixlstat_t)dlsym(RTLD_NEXT, "lstat"); // Candice added
         unixlseek64 = (unixlseek64_t)dlsym(RTLD_NEXT, "lseek64");
+        // unixlstat = (unixlstat_t)dlsym(RTLD_NEXT, "lstat");
         unixxstat = (unixxstat_t)dlsym(RTLD_NEXT, "__xstat");
         unixxstat64 = (unixxstat64_t)dlsym(RTLD_NEXT, "__xstat64");
         unixlxstat = (unixxstat_t)dlsym(RTLD_NEXT, "__lxstat");
@@ -131,6 +130,7 @@ void __attribute__((constructor)) monitorInit(void) {
         unixfread = (unixfread_t)dlsym(RTLD_NEXT, "fread");
         unixfwrite = (unixfwrite_t)dlsym(RTLD_NEXT, "fwrite");
         unixftell = (unixftell_t)dlsym(RTLD_NEXT, "ftell");
+        // unixfstat = (unixfstat_t)dlsym(RTLD_NEXT, "fstat");
         unixfseek = (unixfseek_t)dlsym(RTLD_NEXT, "fseek");
         unixrewind = (unixrewind_t)dlsym(RTLD_NEXT, "rewind");
         unixfgetc = (unixfgetc_t)dlsym(RTLD_NEXT, "fgetc");
@@ -149,12 +149,18 @@ void __attribute__((constructor)) monitorInit(void) {
         unix_Exit = (unix_Exit_t)dlsym(RTLD_NEXT, "_Exit");
         unix_exit_group = (unix_exit_group_t)dlsym(RTLD_NEXT, "exit_group");
         unix_vfprintf = (unix_vfprintf_t)dlsym(RTLD_NEXT, "vfprintf");
+        // unixmmap = (mmap_t)dlsym(RTLD_NEXT, "mmap");
+        // // Below added for HDF5 POSIX I/O
+        unixpread = (pread_t)dlsym(RTLD_NEXT, "pread");
+        unixpwrite = (pwrite_t)dlsym(RTLD_NEXT, "pwrite");
+        unixpread64 = (pread64_t)dlsym(RTLD_NEXT, "pread64");
+        unixpwrite64 = (pwrite64_t)dlsym(RTLD_NEXT, "pwrite64");
 
         //enable if running into issues with an application that launches child shells
         bool unsetLib = getenv("MONITOR_UNSET_LIB") ? atoi(getenv("MONITOR_UNSET_LIB")) : 0;
         if (unsetLib){
             unsetenv("LD_PRELOAD"); 
-        }    
+        }
     
         timer->end(Timer::MetricType::monitor, Timer::Metric::constructor);
         //*InputFile::_time_of_last_read = std::chrono::high_resolution_clock::now();
@@ -163,42 +169,43 @@ void __attribute__((constructor)) monitorInit(void) {
 }
 
 void __attribute__((destructor)) monitorCleanup(void) {
-    // static CleanupTrackFile aCleanupTrackFile; // candice: need to enable for SRA Search
+    // Removed the manual destructor call.
+    static CleanupTrackFile cleanup;
+
     timer->start();
-    init = false; //set to false because we cant ensure our static members have not already been deleted.
+    init = false; //set to false because we can't ensure our static members have not already been deleted.
 
     curlEnd(Config::curlOnStartup);
     curlDestroy;
 
     if (Config::printStats) {
-        
         std::cout << "[MONITOR] " << "Exiting Client" << std::endl;
         if (ConnectionPool::useCnt->size() > 0) {
             for (auto conUse : *ConnectionPool::useCnt) {
-                //if (conUse.second > 1) {
                 std::cout << "[MONITOR] connection: " << conUse.first << " num_tx: " << conUse.second << " amount: " << (*ConnectionPool::stats)[conUse.first].first << " B time: " << (*ConnectionPool::stats)[conUse.first].second << " s avg BW: " << ((*ConnectionPool::stats)[conUse.first].first / (*ConnectionPool::stats)[conUse.first].second) / 1000000 << "MB/s" << std::endl;
-                //}
             }
         }
         delete track_files;
     }
 
-    
-    //delete InputFile::_cache; //desturctor time tracked by each cache...
-    //delete InputFile::_decompressionPool;
-    //delete InputFile::_transferPool;
-    //delete OutputFile::_decompressionPool;
-    //delete OutputFile::_transferPool;
-    //delete LocalFile::_cache; //desturctor time tracked by each cache...
+    timer->end(Timer::MetricType::monitor, Timer::Metric::destructor);
 
+    timer->start();
     FileCacheRegister::closeFileCacheRegister();
     ConnectionPool::removeAllConnectionPools();
     Connection::closeAllConnections();
     timer->end(Timer::MetricType::monitor, Timer::Metric::destructor);
 
-    // printf("Timestamp[monitorCleanup]: %ld\n", timer->getCurrentTime()); // candice added
-
     delete timer;
+}
+
+std::string getFileNameFromFd(int fd) {
+    std::lock_guard<std::mutex> lock(fdToFileMapMutex);
+    auto it = fdToFileMap.find(fd);
+    if (it != fdToFileMap.end()) {
+        return it->second;
+    }
+    return "";
 }
 
 int removeStr(char *s, const char *r) {
@@ -212,32 +219,35 @@ int removeStr(char *s, const char *r) {
 
 
 int trackFileOpen(std::string name, std::string metaName, MonitorFile::Type type, const char *pathname, int flags, int mode) {
+  DPRINTF("Lib.cpp: trackfileOpen: %s %s %u\n", name.c_str(), metaName.c_str(), type);
 
-  // // Add O_CREAT if file creation is happens
-  // if (flags & O_RDWR && !(flags & O_CREAT)) {
-  //   DPRINTF("Adding O_CREAT flag to open call.\n");
-  //   flags |= O_CREAT;
-  // }
+  // Add O_CREAT if file creation is happens
+  if (flags & O_RDWR && !(flags & O_CREAT)) {
+    DPRINTF("Lib.cpp: Adding O_CREAT flag to open call.\n");
+    flags |= O_CREAT;
+  }
 
-  flags |= O_CREAT; // FIXME: force create, particularly for HDF5 and netCDF files
+  auto fd = (*unixopen64)(name.c_str(), flags, mode);
+  if (fd > 0) {
 
-#ifdef LIBDEBUG
-  DPRINTF("trackfileOpen: %s %s %u\n", name.c_str(), metaName.c_str(), type);
-#endif
-  auto fd = (*unixopen)(name.c_str(), flags, mode);
-  if (fd >= 0) {  
     MonitorFile *file = MonitorFile::addNewMonitorFile(type, name, name, fd, true);
     if (file) {
-      MonitorFileDescriptor::addMonitorFileDescriptor(fd, file, file->newFilePosIndex());
-#ifdef LIBDEBUG
-      DPRINTF("trackFileOpen add new file success: %s , fd = %d\n", pathname, fd);
-#endif
+        bool descriptorAdded = MonitorFileDescriptor::addMonitorFileDescriptor(fd, file, file->newFilePosIndex());
+        if (descriptorAdded) {
+            file->open();
+            DPRINTF("Lib.cpp: trackFileOpen() add new file success: %s , fd = %d\n", pathname, fd);
+        } else {
+            DPRINTF("Lib.cpp: trackFileOpen() Failed to add monitor file descriptor for file: %s, fd = %d\n", pathname, fd);
+            // // Optionally clean up the `MonitorFile` object if the descriptor addition fails
+            // MonitorFile::removeMonitorFile(file);
+            // close(fd);
+            // fd = -1; // Indicate failure
+        }
     } 
+
   } else {
-#ifdef LIBDEBUG
-    DPRINTF("fd value %d\n", fd);
-#endif
-    DPRINTF("trackFileOpen() Error opening file: %s, message: %s flag: %d mode: %d \n", name.c_str(), strerror(errno), flags, mode);
+    DPRINTF("Lib.cpp: fd value %d\n", fd);
+    DPRINTF("Lib.cpp: Error opening file: %s flag: %d mode: %d \n", strerror(errno), flags, mode);
   }
   return fd;
 }
@@ -245,15 +255,23 @@ int trackFileOpen(std::string name, std::string metaName, MonitorFile::Type type
 /*Posix******************************************************************************************************/
 
 int monitorOpen(std::string name, std::string metaName, MonitorFile::Type type, const char *pathname, int flags, int mode) {
-#ifdef LIBDEBUG
-  DPRINTF("In monitor open \n");
-#endif
   auto fd = (*unixopen64)(metaName.c_str(), O_RDONLY, 0);
   MonitorFile *file = MonitorFile::addNewMonitorFile(type, name, metaName, fd);
   if (file) {
-    MonitorFileDescriptor::addMonitorFileDescriptor(fd, file, file->newFilePosIndex());
+    // MonitorFileDescriptor::addMonitorFileDescriptor(fd, file, file->newFilePosIndex());
+    bool descriptorAdded = MonitorFileDescriptor::addMonitorFileDescriptor(fd, file, file->newFilePosIndex());
+    if (descriptorAdded) {
+        file->open();
+        DPRINTF("Lib.cpp: monitorOpen add new file success: %s , fd = %d\n", pathname, fd);
+    } else {
+        DPRINTF("Lib.cpp: monitorOpen() Failed to add monitor file descriptor for file: %s, fd = %d\n", pathname, fd);
+        // Optionally clean up the `MonitorFile` object if the descriptor addition fails
+        MonitorFile::removeMonitorFile(file);
+        close(fd);
+        fd = -1; // Indicate failure
+    }
   } else if(fd != -1) {
-    DPRINTF("monitorOpen add new monitor file failed: %s %s %d\n", name.c_str(), metaName.c_str(), fd);
+    DPRINTF("Lib.cpp: monitorOpen add new monitor file failed: %s %s %d\n", name.c_str(), metaName.c_str(), fd);
     (*unixclose)(fd);
     fd = -1;
   }
@@ -261,36 +279,7 @@ int monitorOpen(std::string name, std::string metaName, MonitorFile::Type type, 
 }
 
 int open(const char *pathname, int flags, ...) {
-#ifdef LIBDEBUG
-  DPRINTF("Open %s: \n", pathname);
-#endif
-  int mode = 0;
-  va_list arg;
-  va_start(arg, flags);
-  mode = va_arg(arg, int);
-  va_end(arg);
-
-  Timer::Metric metric = (flags & O_WRONLY || flags & O_RDWR) ? Timer::Metric::out_open : Timer::Metric::in_open;
-
-
-
-  for (auto pattern: patterns) {
-    auto ret_val = fnmatch(pattern.c_str(), pathname, 0);
-    if (ret_val == 0) {
-#ifdef LIBDEBUG
-      DPRINTF("Firing off trackFileOpen for %s \n ", pathname);
-#endif
-      return outerWrapper("open", pathname, metric, trackFileOpen, unixopen, 
-			  pathname, flags, mode);
-    }
-  }
-
-  return outerWrapper("open", pathname, metric, monitorOpen, unixopen, pathname, flags, mode);
-}
-
-
-
-int open64(const char *pathname, int flags, ...) {
+    DPRINTF("Lib.cpp: Open %s: \n", pathname);
     int mode = 0;
     va_list arg;
     va_start(arg, flags);
@@ -299,22 +288,60 @@ int open64(const char *pathname, int flags, ...) {
 
     Timer::Metric metric = (flags & O_WRONLY || flags & O_RDWR) ? Timer::Metric::out_open : Timer::Metric::in_open;
 
+    // Check if the file matches any pattern
+    for (auto pattern : patterns) {
+        if (fnmatch(pattern.c_str(), pathname, 0) == 0) {
+            DPRINTF("Lib.cpp: open() Firing off trackFileOpen for %s\n", pathname);
+            int fd = outerWrapper("open", pathname, metric, trackFileOpen, unixopen, pathname, flags, mode);
 
+            if (fd >= 0) {
+                // Track the fd and pathname
+                std::lock_guard<std::mutex> lock(fdToFileMapMutex);
+                fdToFileMap[fd] = std::string(pathname);
+            } else {
+                DPRINTF("Lib.cpp: trackFileOpen failed for %s\n", pathname);
+            }
+            return fd;
+        }
+    }
+
+    // If no pattern matched, fallback to monitorOpen
+    DPRINTF("Lib.cpp: open() Firing off monitorOpen for %s\n", pathname);
+    int fd = outerWrapper("open", pathname, metric, monitorOpen, unixopen, pathname, flags, mode);
+
+    if (fd >= 0) {
+        // Track the fd and pathname
+        std::lock_guard<std::mutex> lock(fdToFileMapMutex);
+        fdToFileMap[fd] = std::string(pathname);
+    } else {
+        DPRINTF("Lib.cpp: monitorOpen failed for %s\n", pathname);
+    }
+
+    return fd;
+}
+
+int open64(const char *pathname, int flags, ...) {
+  DPRINTF("Lib.cpp: Open64 %s: \n", pathname);
+    int mode = 0;
+    va_list arg;
+    va_start(arg, flags);
+    mode = va_arg(arg, int);
+    va_end(arg);
+
+    Timer::Metric metric = (flags & O_WRONLY || flags & O_RDWR) ? Timer::Metric::out_open : Timer::Metric::in_open;
 
     for (auto pattern: patterns) {
         auto ret_val = fnmatch(pattern.c_str(), pathname, 0);
         if (ret_val == 0) {
-#ifdef LIBDEBUG
-            DPRINTF("Firing off trackFileOpen[64] for %s \n ", pathname);
-#endif
-            return outerWrapper("open64", pathname, metric, trackFileOpen, unixopen64, 
+            DPRINTF("Lib.cpp: open64() Firing off trackfileopen for %s \n ", pathname);
+
+            int fd = outerWrapper("open64", pathname, metric, trackFileOpen, unixopen64, 
 			    pathname, flags, mode);
+
         }
     }
 
-#ifdef LIBDEBUG
-    DPRINTF("Open64 %s: \n", pathname);
-#endif
+    DPRINTF("Lib.cpp: Open64 %s: \n", pathname);
     return outerWrapper("open64", pathname, metric, monitorOpen, unixopen64, pathname, flags, mode);
 }
 
@@ -325,23 +352,16 @@ int monitorOpenat(std::string name, std::string metaName, MonitorFile::Type type
 
 int trackFileOpenat(std::string name, std::string metaName, MonitorFile::Type type, 
 		    int dirfd, const char *pathname, int flags, int mode) {
-#ifdef LIBDEBUG
-  DPRINTF("trackfileOpenat: %s %s %u\n", name.c_str(), metaName.c_str(), type);
-#endif
+  DPRINTF("Lib.cpp: trackfileOpenat: %s %s %u\n", name.c_str(), metaName.c_str(), type);
   auto fd = (*unixopenat)(dirfd, name.c_str(), flags);
   if (fd > 0) {  
     MonitorFile *file = MonitorFile::addNewMonitorFile(type, name, name, fd, true);
     if (file) {
       MonitorFileDescriptor::addMonitorFileDescriptor(fd, file, file->newFilePosIndex());
-#ifdef LIBDEBUG
-      DPRINTF("trackFileOpen add new  file success: %s , fd = %d\n", pathname, fd);
-#endif
+      DPRINTF("Lib.cpp: trackFileOpen add new  file success: %s , fd = %d\n", pathname, fd);
     } 
   } else {
-#ifdef LIBDEBUG
-    DPRINTF("fd value %d\n", fd);
-#endif
-    DPRINTF("trackFileOpenat() Error opening file: %s flag: %d mode: %d \n", strerror(errno), flags, mode);
+    DPRINTF("Lib.cpp: fd value %d\n", fd);
   }
   return fd;
 }
@@ -356,17 +376,12 @@ int openat(int dirfd, const char *pathname, int flags, ...) {
   Timer::Metric metric = (flags & O_WRONLY || flags & O_RDWR) ? 
     Timer::Metric::out_open : Timer::Metric::in_open;
 
-#ifdef LIBDEBUG
-  DPRINTF("Openat %s: \n", pathname);
-#endif
-
-
+  DPRINTF("Lib.cpp: Openat %s: \n", pathname);
   for (auto pattern: patterns) {
     auto ret_val = fnmatch(pattern.c_str(), pathname, 0);
     if (ret_val == 0) {
-#ifdef LIBDEBUG
-      DPRINTF("Firing off trackFileOpenat for %s \n ", pathname);
-#endif
+      DPRINTF("Lib.cpp: Firing off trackfileopen for %s \n ", pathname);
+
       return outerWrapper("openat", pathname, metric, trackFileOpenat, unixopenat, 
 			  dirfd, pathname, flags, mode);
     }
@@ -377,49 +392,45 @@ int openat(int dirfd, const char *pathname, int flags, ...) {
 }
 
 int monitorClose(MonitorFile *file, unsigned int fp, int fd) {
-#ifdef LIBDEBUG
-  DPRINTF("In monitor close \n");
-#endif
-
-// candice commented out
+    DPRINTF("Lib.cpp: In monitor close for fd %d\n", fd);
 #ifdef TRACKFILECHANGES
-
-
-
-  for (auto pattern: patterns) {
-    auto ret_val = fnmatch(pattern.c_str(), file->name().c_str(), 0);
-    if (ret_val == 0) {
-      file->close();
-#ifdef LIBDEBUG
-      DPRINTF("Successfully closed a file with fd %d\n", fd);
-#endif
-      break;
+    for (auto pattern : patterns) {
+        if (fnmatch(pattern.c_str(), file->name().c_str(), 0) == 0) {
+            file->close();
+            DPRINTF("Lib.cpp: Successfully closed a file with fd %d\n", fd);
+            break;
+        }
     }
-  }
 #endif
-
     MonitorFile::removeMonitorFile(file);
     MonitorFileDescriptor::removeMonitorFileDescriptor(fd);
-    
-#ifdef TRACKFILECHANGES
-    return 0;
-#else
     return (*unixclose)(fd);
-#endif
 }
 
 int close(int fd) {
-#ifdef LIBDEBUG
-    DPRINTF("Trying to close file with fd %d\n", fd);
-#endif
+    DPRINTF("Lib.cpp: Trying to close file with fd %d\n", fd);
+    {
+        std::lock_guard<std::mutex> lock(fdToFileMapMutex);
+        fdToFileMap.erase(fd);
+    }
+
+    MonitorFile *file = nullptr;
+    unsigned int pos = 0;
+
+    if (MonitorFileDescriptor::lookupMonitorFileDescriptor(fd, file, pos)) {
+        DPRINTF("Lib.cpp: MonitorFile found for fd %d.\n", fd);
+    } else {
+        DPRINTF("Lib.cpp: No MonitorFile found for fd %d.\n", fd);
+    }
+    
     return outerWrapper("close", fd, Timer::Metric::close, monitorClose, unixclose, fd);
+
 }
+
 
 #ifdef TRACKRESOURCE
 void exit(int status) {
-#ifdef LIBDEBUG
-  DPRINTF("Calling exit \n");
-#endif
+  DPRINTF("Lib.cpp: Calling exit \n");
   auto iter = Trackable<int, MonitorFileDescriptor *>::begin();
   while (true) {
     auto next_iter = Trackable<int, MonitorFileDescriptor *>::next(iter);
@@ -437,80 +448,57 @@ void exit(int status) {
 }
 
 void _exit(int status) {
-#ifdef LIBDEBUG
-  DPRINTF("Calling _exit \n");
-#endif
+  DPRINTF("Lib.cpp: Calling _exit \n");
   (*unix_exit)(status);
 }
 
 void _Exit(int status) {
-#ifdef LIBDEBUG
-  DPRINTF("Calling _Exit \n");
-#endif
+  DPRINTF("Lib.cpp: Calling _Exit \n");
   (*unix_Exit)(status);
 }
 
 void exit_group(int status) {
-#ifdef LIBDEBUG
-  DPRINTF("Calling exit_group \n");
-#endif
+  DPRINTF("Lib.cpp: Calling exit_group \n");
   (*unix_exit_group)(status);
 }
 #endif
 
 ssize_t monitorRead(MonitorFile *file, unsigned int fp, int fd, void *buf, size_t count) {
-#ifdef LIBDEBUG
-    DPRINTF("In Monitor read\n");
-#endif
-  
+  DPRINTF("Lib.cpp: In Monitor read\n");
   ssize_t ret = file->read(buf, count, fp);
-  timer->addAmt(Timer::MetricType::monitor, Timer::Metric::read, ret); // candice: removed
+  timer->addAmt(Timer::MetricType::monitor, Timer::Metric::read, ret);
   return ret;
-#ifdef LIBDEBUG
-    DPRINTF("Returning from Monitor read\n");
-#endif
 }
 
 ssize_t read(int fd, void *buf, size_t count) {
     vLock.readerLock();
-#ifdef LIBDEBUG
-    DPRINTF("Original read count %u\n", count);
-#endif
+    DPRINTF("Lib.cpp: Invoking read fd: %d count: %u\n", fd, count);
     auto ret = outerWrapper("read", fd, Timer::Metric::read, monitorRead, unixread, fd, buf, count);
     vLock.readerUnlock();
     return ret;
 }
 
 ssize_t monitorWrite(MonitorFile *file, unsigned int fp, int fd, const void *buf, size_t count) {
-#ifdef LIBDEBUG
-    DPRINTF("In Monitor write\n");
-#endif
-    auto ret = file->write(buf, count, fp);
-    timer->addAmt(Timer::MetricType::monitor, Timer::Metric::write, ret); // candice: removed
-    // DPRINTF("In Monitor write count %ld\n", count);
-    // DPRINTF("In Monitor write ret %ld\n", ret);
-    // timer->addAmt(Timer::MetricType::monitor, Timer::Metric::write, count); // candice: removed
-#ifdef LIBDEBUG
-    DPRINTF("Returning from Monitor write\n");
-#endif
+    DPRINTF("Lib.cpp: In Monitor write\n");
+    // auto ret = file->write(buf, count, fp);
+    // Pass -1 for offset to indicate positional write
+    auto ret = file->write(buf, count, fp, -1);
+    timer->addAmt(Timer::MetricType::monitor, Timer::Metric::write, ret);
+    DPRINTF("Lib.cpp: Returning from Monitor write\n");
     return ret;
 }
 
 ssize_t write(int fd, const void *buf, size_t count) {
-    vLock.readerLock();
-// #ifdef LIBDEBUG
-//     DPRINTF("Printing fd in write %d and count %u\n", fd, count);
-// #endif
+    vLock.writerLock();
+    DPRINTF("Lib.cpp: Invoking write fd: %d count: %u\n", fd, count);
     auto ret = outerWrapper("write", fd, Timer::Metric::write, monitorWrite, unixwrite, fd, buf, count);
-    vLock.readerUnlock();
+    vLock.writerUnlock();
     return ret;
 }
 
 template <typename T>
 T monitorLseek(MonitorFile *file, unsigned int fp, int fd, T offset, int whence) {
-    auto ret = (T)file->seek(offset, whence, fp);
-    timer->addAmt(Timer::MetricType::monitor, Timer::Metric::seek, ret);
-    return ret;
+    return (T)file->seek(offset, whence, fp);
 }
 
 off_t lseek(int fd, off_t offset, int whence) ADD_THROW {
@@ -533,18 +521,12 @@ int innerStat(int version, const char *filename, struct stat *buf) { return whic
 thread_local unixxstat64_t whichStat64 = NULL;
 int innerStat(int version, const char *filename, struct stat64 *buf) { return whichStat64(version, filename, buf); }
 
-thread_local unixlstat_t whichLstat = NULL; // Candice added
-// int innerStat(int version, const char *filename, struct stat *buf) { return whichLstat(version, filename, buf); }
-
+// thread_local unixlstat_t whichLstat = NULL;
+// thread_local unixfstat_t whichFstat = NULL;
 
 template <typename T>
 int monitorStat(std::string name, std::string metaName, MonitorFile::Type type, int version, const char *filename, T *buf) {
-#ifdef LIBDEBUG
-  DPRINTF("In monitor stat \n");
-#endif
   auto ret = innerStat(_STAT_VER, metaName.c_str(), buf);
-
-  
   MonitorFile *file = MonitorFile::lookUpMonitorFile(filename);
   if (file)
     buf->st_size = (off_t)file->fileSize();
@@ -554,18 +536,28 @@ int monitorStat(std::string name, std::string metaName, MonitorFile::Type type, 
     }
 
     int fd = (*unixopen)(metaName.c_str(), O_RDONLY, 0);
+    /*if(type == MonitorFile::Type::Input) {
+      InputFile tempFile(name, metaName, fd, false);
+      buf->st_size = tempFile.fileSize();
+    }
+    else if(type == MonitorFile::Type::Local) {
+      int urlSize = supportedUrlType(name) ? sizeUrlPath(name) : -1;
+      if(urlSize > -1) {
+	if(Config::downloadForSize)
+	  buf->st_size = urlSize;
+	else if(urlSize == 0)
+	  buf->st_size = 1;
+      }
+      else {
+	LocalFile tempFile(name, metaName, fd, false);
+	buf->st_size = tempFile.fileSize();
+      }
+    }*/
+
     (*unixclose)(fd);
   }
-
   return ret;
 }
-
-// Candice added
-int lstat(int version, const char *filename, struct stat *buf) ADD_THROW {
-    whichLstat = unixlstat;
-    return outerWrapper("lstat", filename, Timer::Metric::stat, monitorStat<struct stat>, unixlstat, version, filename, buf);
-}
-
 
 int __xstat(int version, const char *filename, struct stat *buf) ADD_THROW {
     whichStat = unixxstat;
@@ -616,35 +608,18 @@ ssize_t monitorVector(const char *name, Timer::Metric metric, Func monitorFun, F
 }
 
 ssize_t readv(int fd, const struct iovec *iov, int iovcnt) {
-    // // Calculate the total number of bytes in the iovec array
-    // ssize_t read_bytes = 0;
-    // for (int i = 0; i < iovcnt; ++i) {
-    //     read_bytes += iov[i].iov_len;
-    // }
-    // ssize_t read_bytes = sizeof(iov) * iovcnt;
-    // timer->addAmt(Timer::MetricType::monitor, Timer::Metric::read, read_bytes); // candice: added
-
     return monitorVector("read", Timer::Metric::readv, monitorRead, unixread, fd, iov, iovcnt);
 }
 
 ssize_t writev(int fd, const struct iovec *iov, int iovcnt) {
-    // // Calculate the total number of bytes in the iovec array
-    // ssize_t write_bytes = 0;
-    // for (int i = 0; i < iovcnt; ++i) {
-    //     write_bytes += iov[i].iov_len;
-    // }
-    // ssize_t write_bytes = sizeof(iov) * iovcnt;
-    // timer->addAmt(Timer::MetricType::monitor, Timer::Metric::write, write_bytes); // candice: added
-
     return monitorVector("write", Timer::Metric::writev, monitorWrite, unixwrite, fd, iov, iovcnt);
 }
 
 /*Streaming**************************************************************************************************/
 
 FILE *trackFileFopen(std::string name, std::string metaName, MonitorFile::Type type, const char *__restrict fileName, const char *__restrict modes) {
-#ifdef LIBDEBUG
-  DPRINTF("trackFOpen: %s %s %u\n", name.c_str(), metaName.c_str(), type);
-#endif
+  // DPRINTF("Lib.cpp: trackFileFopen: %s %s %u\n", name.c_str(), metaName.c_str(), type);
+  DPRINTF("Lib.cpp: in trackFileFopen\n");
   FILE *fp = (*unixfopen)(name.c_str(), modes);
   if (fp) {
     int fd = fileno(fp);
@@ -652,18 +627,14 @@ FILE *trackFileFopen(std::string name, std::string metaName, MonitorFile::Type t
     if (file) {
       MonitorFileDescriptor::addMonitorFileDescriptor(fd, file, file->newFilePosIndex());
       MonitorFileStream::addStream(fp, fd);
-#ifdef LIBDEBUG
-      DPRINTF("trackFileOpen add new  file success: %s , fd = %d\n", fileName, fd);
-#endif
+      DPRINTF("Lib.cpp: trackFileOpen add new  file success: %s , fd = %d\n", fileName, fd);
     }
   }
   return fp;
 }
 
 FILE *monitorFopen(std::string name, std::string metaName, MonitorFile::Type type, const char *__restrict fileName, const char *__restrict modes) {
-#ifdef LIBDEBUG
-  DPRINTF("monitorFOpen: %s %s %u\n", name.c_str(), metaName.c_str(), type);
-#endif
+  DPRINTF("Lib.cpp: monitorFOpen: %s %s %u\n", name.c_str(), metaName.c_str(), type);
     char m = 'r';
     FILE *fp = (*unixfopen)(fileName, &m);
     if (fp) {
@@ -678,16 +649,13 @@ FILE *monitorFopen(std::string name, std::string metaName, MonitorFile::Type typ
 }
 
 FILE *fopen(const char *__restrict fileName, const char *__restrict modes) {
-#ifdef LIBDEBUG
-  DPRINTF("Calling fopen on %s \n", fileName);
-#endif
+  DPRINTF("Lib.cpp: Calling fopen on %s \n", fileName);  
   Timer::Metric metric = (modes[0] == 'r') ? Timer::Metric::in_fopen : Timer::Metric::out_fopen;
-
-
 
   for (auto pattern: patterns) {
     auto ret_val = fnmatch(pattern.c_str(), fileName, 0);
     if (ret_val == 0) {
+
       return outerWrapper("fopen", fileName, metric, trackFileFopen, unixfopen, 
 			  fileName, modes);
     }
@@ -697,40 +665,36 @@ FILE *fopen(const char *__restrict fileName, const char *__restrict modes) {
 }
 
 FILE *fopen64(const char *__restrict fileName, const char *__restrict modes) {
-#ifdef LIBDEBUG
-  DPRINTF("Calling fopen64 on %s \n", fileName);  
-#endif
+  DPRINTF("Lib.cpp: Calling fopen64 on %s \n", fileName);  
   Timer::Metric metric = (modes[0] == 'r') ? Timer::Metric::in_fopen : Timer::Metric::out_fopen;
-
 
   for (auto pattern: patterns) {
     auto ret_val = fnmatch(pattern.c_str(), fileName, 0);
-    if (ret_val == 0) {
+    if (ret_val == 0 
+    // && (strstr(fileName, "_r_stat") || strstr(fileName, "_w_stat") || strstr(fileName, "_trace_stat"))
+    ) {
+      DPRINTF("Lib.cpp: fopen64() Found pattern [%s] \n", pattern.c_str());
       return outerWrapper("fopen64", fileName, metric, trackFileFopen, unixfopen64, 
 			  fileName, modes);
     }
   }  
 
-  return outerWrapper("fopen64", fileName, metric, monitorFopen, unixfopen64, fileName, modes);
+    return outerWrapper("fopen64", fileName, metric, monitorFopen, unixfopen64, fileName, modes);
 }
 
 int monitorFclose(MonitorFile *file, unsigned int pos, int fd, FILE *fp) {
+  DPRINTF("Lib.cpp: In monitor fclose \n");
 #ifdef TRACKFILECHANGES
-
-
   for (auto pattern: patterns) {
     auto ret_val = fnmatch(pattern.c_str(), file->name().c_str(), 0);
     if (ret_val == 0) {
-      file->close(); // candice remove
-#ifdef LIBDEBUG
-      DPRINTF("Successfully closed a file with fd %d\n", fd);
-#endif
-      break;
+      file->close();
+      DPRINTF("Lib.cpp: Successfully closed a file with fd %d\n", fd);
     }
   }
 #endif
     MonitorFile::removeMonitorFile(file);
-    MonitorFileDescriptor::removeMonitorFileDescriptor(fd); // candice remove
+    MonitorFileDescriptor::removeMonitorFileDescriptor(fd);
     
 #ifdef TRACKFILECHANGES
     return 0;
@@ -740,83 +704,40 @@ int monitorFclose(MonitorFile *file, unsigned int pos, int fd, FILE *fp) {
 }
 
 int fclose(FILE *fp) {
+    DPRINTF("Lib.cpp: Invoking fclose \n");
     return outerWrapper("fclose", fp, Timer::Metric::close, monitorFclose, unixfclose, fp);
-    // int fd = fileno(fp);
-    // return outerWrapper("close", fd, Timer::Metric::close, monitorClose, unixclose, fd);
 }
 
 size_t monitorFread(MonitorFile *file, unsigned int pos, int fd, void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp) {
-    DPRINTF("fread Invoking monitorFread\n");
+  DPRINTF("Lib.cpp: In monitor fread \n");
     auto read_bytes = (size_t)file->read(ptr, size * n, pos);
-    timer->addAmt(Timer::MetricType::monitor, Timer::Metric::read, read_bytes); // candice: removed
     if (read_bytes >= size){return n;}
     else return (size_t) (size / n) ;
 }
 
 size_t fread(void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp) {
-#ifdef LIBDEBUG
-  DPRINTF("fread Invoking fread\n");
-#endif
+  DPRINTF("Lib.cpp: Invoking fread \n");
   auto ret_val = outerWrapper("fread", fp, Timer::Metric::read, 
 			      monitorFread, unixfread, ptr, size, n, fp);
-
-  // auto ret_val = outerWrapper("fread", fp, Timer::Metric::read, 
-	// 		      monitorRead, unixfread, ptr, size, n, fp);
-#ifdef LIBDEBUG
-  DPRINTF("fread return value %d\n", ret_val);
-#endif
+  DPRINTF("Lib.cpp: fread return value %d\n", ret_val);
   return ret_val;
 }
 
-ssize_t monitorFwrite(MonitorFile *file, unsigned int pos, const void *__restrict ptr, size_t total_bytes) {
-#ifdef LIBDEBUG
-    DPRINTF("Invoking monitorFwrite %zu bytes\n", total_bytes);
-#endif
-    auto written_bytes = file->write(ptr, total_bytes, pos);
-    timer->addAmt(Timer::MetricType::monitor, Timer::Metric::write, written_bytes);
-    return written_bytes;
+size_t monitorFwrite(MonitorFile *file, unsigned int pos, int fd, const void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp) {
+    DPRINTF("Lib.cpp: In monitor fwrite \n");
+    // auto written_bytes = (size_t)file->write(ptr, size * n, pos);
+    auto written_bytes = file->write(ptr, size * n, pos, -1);
+    if (written_bytes >= size) return n;
+    else return (size_t) (size / n);
 }
 
 size_t fwrite(const void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp) {
-    MonitorFile *file = lookUpMonitorFile(filename);
-    unsigned int pos = static_cast<unsigned int>(ftell(fp));
-    size_t total_bytes = size * n;
-
-    auto ret_val = outerWrapper("fwrite", fp, Timer::Metric::write, monitorFwrite, unixfwrite, file, pos, ptr, total_bytes);
-    return ret_val / size;
+    DPRINTF("Lib.cpp: Invoking fwrite \n");
+    return outerWrapper("fwrite", fp, Timer::Metric::write, monitorFwrite, unixfwrite, ptr, size, n, fp);
 }
-
-// size_t monitorFwrite(MonitorFile *file, unsigned int pos, int fd, const void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp) {
-// #ifdef LIBDEBUG
-//     DPRINTF("Invoking monitorFwrite %d %d \n", size * n, fd);
-// #endif
-//     auto written_bytes = (size_t)file->write(ptr, size * n, pos);
-//     timer->addAmt(Timer::MetricType::monitor, Timer::Metric::write, written_bytes); // candice: removed
-//     if (written_bytes >= size) return n;
-//     else return (size_t) (size / n);
-// }
-
-// size_t fwrite(const void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp) {
-// #ifdef LIBDEBUG
-//   printf("fwrite Invoking fwrite\n");
-// #endif
-//   // int fd = fileno(fp);
-//     //return outerWrapper("fwrite", fp, Timer::Metric::read, monitorFwrite, unixfwrite, ptr, size, n, fp);
-//     auto ret_val = outerWrapper("fwrite", fp, Timer::Metric::write, monitorFwrite, unixfwrite, ptr, size, n, fp);
-//     // auto ret_val = outerWrapper("fwrite", fp, Timer::Metric::write, monitorWrite, unixfwrite, fileno(fp), ptr, size * n);
-
-// #ifdef LIBDEBUG
-//   DPRINTF("fwrite return value %d\n", ret_val);
-// #endif
-//   return ret_val;
-// }
-
 
 int monitorVfprintf(MonitorFile *file, unsigned int pos, int fd, FILE * stream, 
 		     const char * format, ...) {
-#ifdef LIBDEBUG
-  DPRINTF("In monitor vfprint \n");
-#endif
   va_list args;
   va_start(args, format);
   auto count = unix_vfprintf(stream, format, args);
@@ -824,9 +745,7 @@ int monitorVfprintf(MonitorFile *file, unsigned int pos, int fd, FILE * stream,
   return count;
 }
 int vfprintf(FILE * stream, const char * format, va_list arg ) {
-#ifdef LIBDEBUG
-  //DPRINTF("Invoking vfprintf\n");
-#endif
+  //DPRINTF("Lib.cpp: Invoking vfprintf\n");
   return outerWrapper("vfprintf", stream, Timer::Metric::write, monitorVfprintf, 
 		      unix_vfprintf, stream, format, arg);
 }
@@ -938,3 +857,88 @@ void rewind(FILE *fp) {
     // outerWrapper(fp, Timer::Metric::rewind, monitorRewind, unixlseek, fd, 0L, SEEK_SET);
     fseek(fp, 0L, SEEK_SET);
 }
+
+// void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
+//     if (!unixmmap) unixmmap = (mmap_t)dlsym(RTLD_NEXT, "mmap");
+//     DPRINTF("Lib.cpp: Intercepting mmap: addr=%p, length=%zu, prot=%d, flags=%d, fd=%d, offset=%ld\n",
+//            addr, length, prot, flags, fd, offset);
+
+//     // Call the original `mmap`
+//     return unixmmap(addr, length, prot, flags, fd, offset);
+// }
+
+/* POSIX I/O */
+ssize_t monitorPread(MonitorFile *file, unsigned int pos, int fd, void *buf, size_t count, off_t offset) {
+    DPRINTF("Lib.cpp: In monitor pread: fd=%d, count=%zu, offset=%lld\n", fd, count, (long long)offset);
+
+    // Use the file object to perform the read operation
+    auto read_bytes = (ssize_t)file->read(buf, count, pos, offset);
+
+    // Update the timer with the number of bytes read
+    timer->addAmt(Timer::MetricType::monitor, Timer::Metric::read, read_bytes);
+
+    return read_bytes;
+}
+
+ssize_t pread(int fd, void *buf, size_t count, off_t offset) {
+    DPRINTF("Lib.cpp: Invoking pread: fd=%d, count=%zu, offset=%lld\n", fd, count, (long long)offset);
+
+    auto ret = outerWrapper("pread", fd, Timer::Metric::read, monitorPread, unixpread, fd, buf, count, offset);
+    return ret;
+}
+
+ssize_t monitorPwrite(MonitorFile *file, unsigned int pos, int fd, const void *buf, size_t count, off_t offset) {
+    DPRINTF("Lib.cpp: In monitor pwrite: fd=%d, count=%zu, offset=%ld\n", fd, count, offset);
+
+    // Pass `offset` to the TrackFile::write method
+    auto bytes_written = (ssize_t)file->write(buf, count, pos, offset);
+
+    timer->addAmt(Timer::MetricType::monitor, Timer::Metric::write, bytes_written);
+    return bytes_written;
+}
+
+ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset) {
+    DPRINTF("Lib.cpp: Invoking pwrite: fd=%d, count=%zu, offset=%ld\n", fd, count, offset);
+
+    auto ret = outerWrapper("pwrite", fd, Timer::Metric::write,
+                            monitorPwrite, unixpwrite, fd, buf, count, offset);
+    return ret;
+}
+
+ssize_t monitorPread64(MonitorFile *file, unsigned int pos, int fd, void *buf, size_t count, off64_t offset) {
+    DPRINTF("Lib.cpp: In monitor pread64: fd=%d, count=%zu, offset=%lld\n", fd, count, (long long)offset);
+
+    // Use the file object to perform the read operation
+    auto read_bytes = (ssize_t)file->read(buf, count, pos, offset);
+
+    // Update the timer with the number of bytes read
+    timer->addAmt(Timer::MetricType::monitor, Timer::Metric::read, read_bytes);
+
+    return read_bytes;
+}
+
+ssize_t pread64(int fd, void *buf, size_t count, off64_t offset) {
+    DPRINTF("Lib.cpp: Invoking pread64: fd=%d, count=%zu, offset=%lld\n", fd, count, (long long)offset);
+    auto ret = outerWrapper("pread64", fd, Timer::Metric::read, monitorPread64, unixpread64, fd, buf, count, offset);
+    return ret;
+}
+
+
+
+ssize_t monitorPwrite64(MonitorFile *file, unsigned int pos, int fd, const void *buf, size_t count, off64_t offset) {
+    DPRINTF("Lib.cpp: In monitor pwrite64: fd=%d, count=%zu, offset=%ld\n", fd, count, offset);
+    // Pass the correct `pos` as the `index` to TrackFile::write
+    // auto bytes_written = (ssize_t)file->write(buf, count, pos);
+    auto bytes_written = (ssize_t)file->write(buf, count, pos, offset);
+    timer->addAmt(Timer::MetricType::monitor, Timer::Metric::write, bytes_written);
+    return bytes_written;
+}
+
+ssize_t pwrite64(int fd, const void *buf, size_t count, off64_t offset) {
+    DPRINTF("Lib.cpp: Invoking pwrite64: fd=%d, count=%zu, offset=%ld\n", 
+        fd, count, offset);
+    auto ret = outerWrapper("pwrite64", fd, Timer::Metric::write, 
+                            monitorPwrite64, unixpwrite64, fd, buf, count, offset);
+    return ret;
+}
+

@@ -33,23 +33,27 @@
 #include "UnixIO.h"
 #include "ThreadPool.h"
 #include "PriorityThreadPool.h"
-#include "TrackFile.h"
+#include "TrackFile.h" // For JSON tracing
 
 #define ADD_THROW __THROW
 
-//#define DPRINTF(...) fprintf(stderr, __VA_ARGS__)
 #define DPRINTF(...)
+// #ifdef LIBDEBUG
+// #define DPRINTF(...) fprintf(stderr, __VA_ARGS__)
+// #else
+// #define DPRINTF(...)
+// #endif
 // #define MYPRINTF(...) fprintf(stderr, __VA_ARGS__)
 
 #define TRACKFILECHANGES 1
 
-const std::vector<std::string> patterns = {
-    "*.h5", "*.nc", "*.fits", "*.vcf", "*.tar.gz", "*.lht", "*.fna",
+std::vector<std::string> patterns = {
+    "*.fits", "*.vcf", "*.lht", "*.fna",
     "*.*.bt2", "*.fastq", "*.fasta.amb", "*.fasta.sa", "*.fasta.bwt",
     "*.fasta.pac", "*.fasta.ann", "*.fasta", "*.stf",
-    "*.out", "*.dot", "*.gz", "*.dcd", "*.pt", "embeddings*.h5"
-    //"*.pdb",
-    // "SAS", "EAS", "GBR", "AMR", "AFR", "EUR", "ALL",
+    "*.out", "*.dot", "*.gz", "*.tar.gz", "*.dcd", "*.pt", "*.h5", "*.nc", 
+    "SAS", "EAS", "GBR", "AMR", "AFR", "EUR", "ALL",
+    //"*.txt", //"*.pdb",
 };
 
 static Timer* timer;
@@ -80,10 +84,11 @@ std::map<std::string, std::map<int, std::atomic<int64_t> > > track_file_blk_w_st
 std::map<std::string, std::vector<int> > trace_read_blk_seq;
 std::map<std::string, std::vector<int> > trace_write_blk_seq;
 
-// candice added
+// For JOSN tracing
 std::unordered_map<std::string, TraceData> trace_read_blk_order;
 std::unordered_map<std::string, TraceData> trace_write_blk_order;
 int first_access_block;
+int largest_access_block;
 
 unixopen_t unixopen = NULL;
 unixopen_t unixopen64 = NULL;
@@ -92,8 +97,9 @@ unixclose_t unixclose = NULL;
 unixread_t unixread = NULL;
 unixwrite_t unixwrite = NULL;
 unixlseek_t unixlseek = NULL;
-unixlstat_t unixlstat = NULL;
 unixlseek64_t unixlseek64 = NULL;
+// unixlstat_t unixlstat = NULL;
+unixfstat_t unixfstat = NULL;
 unixxstat_t unixxstat = NULL;
 unixxstat64_t unixxstat64 = NULL;
 unixxstat_t unixlxstat = NULL;
@@ -123,6 +129,15 @@ unix_exit_t unix_exit = NULL;
 unix_Exit_t unix_Exit = NULL;
 unix_exit_group_t unix_exit_group = NULL;
 unix_vfprintf_t unix_vfprintf = NULL;
+mmap_t unixmmap = NULL;
+// For POSIX
+pread_t unixpread = NULL;
+pwrite_t unixpwrite = NULL;
+pread64_t unixpread64 = NULL;
+pwrite64_t unixpwrite64 = NULL;
+std::unordered_map<int, std::string> fdToFileMap;
+std::mutex fdToFileMapMutex;
+
 
 bool write_printf = false;
 bool open_printf = false;
@@ -217,7 +232,7 @@ inline void removeFileStream(unixfclose_t posixFun, FILE *fp) {
 
 template <typename Func, typename FuncLocal, typename... Args>
 inline auto innerWrapper(int fd, bool &isMonitorFile, Func monitorFun, FuncLocal localFun, Args... args) {
-  // DPRINTF("[MONITOR] in innerwrapper 3\n");
+    DPRINTF("[MONITOR] in innerwrapper fd: %ld\n", fd);
 
     MonitorFile *file = NULL;
     unsigned int fp = 0;
@@ -227,9 +242,9 @@ inline auto innerWrapper(int fd, bool &isMonitorFile, Func monitorFun, FuncLocal
     
     if (init && MonitorFileDescriptor::lookupMonitorFileDescriptor(fd, file, fp)) {
       DPRINTF("Found a file with fd %d\n", fd);
-        isMonitorFile = true;
-	DPRINTF("calling Monitor function\n");	
-        return monitorFun(file, fp, args...);
+      isMonitorFile = true;
+      DPRINTF("calling Monitor function\n");	
+      return monitorFun(file, fp, args...);
     }
     // else if (not internal write) {
     // do track
@@ -245,6 +260,7 @@ inline auto innerWrapper(FILE *fp, bool &isMonitorFile, Func monitorFun, FuncLoc
   // if (write_printf == true) {
   //   DPRINTF("[MONITOR] in innerwrapper 2 for write\n");
   // }
+  DPRINTF("[MONITOR] in innerwrapper fp: %ld\n", fp);
 
   if (init) {
         ReaderWriterLock *lock = NULL;
@@ -278,17 +294,26 @@ inline auto innerWrapper(const char *pathname, bool &isMonitorFile, Func monitor
     return posixFun(args...);
   }
 
+    std::vector<std::string> patterns = {
+        "*.fits", "*.vcf", "*.lht", "*.fna",
+        "*.*.bt2", "*.fastq", "*.fasta.amb", "*.fasta.sa", "*.fasta.bwt",
+        "*.fasta.pac", "*.fasta.ann", "*.fasta", "*.stf",
+        "*.out", "*.dot", "*.gz", "*.tar.gz", "*.dcd", "*.pt", "*.h5", "*.nc", 
+        //"*.txt", //"*.pdb",
+        "SAS", "EAS", "GBR", "AMR", "AFR", "EUR", "ALL",
+    };
+
   for (auto pattern: patterns) {
     auto ret_val = fnmatch(pattern.c_str(), pathname, 0);
-    // DPRINTF("PATTERN: %s PATHNAME: %s \n", pattern.c_str(), pathname);
     if (ret_val == 0) {
-      isMonitorFile = true;
-      std::string filename(pathname);
-      type = MonitorFile::TrackLocal;
-      file = filename;
-      path = filename;
-      DPRINTF("Calling HDF/FITS open: \n");
-      return monitorFun(file, path, type, args...);
+        DPRINTF("PATTERN: %s PATHNAME: %s \n", pattern.c_str(), pathname);
+        isMonitorFile = true;
+        std::string filename(pathname);
+        type = MonitorFile::TrackLocal;
+        file = filename;
+        path = filename;
+        DPRINTF("Calling HDF/FITS open: \n");
+        return monitorFun(file, path, type, args...);
     }
   }
 
@@ -432,10 +457,7 @@ int fclose(FILE *fp);
 size_t monitorFread(MonitorFile *file, unsigned int pos, int fd, void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp);
 size_t fread(void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp);
 
-// size_t monitorFwrite(MonitorFile *file, unsigned int pos, int fd, const void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp);
-// size_t fwrite(const void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp);
-
-ssize_t monitorFwrite(MonitorFile *file, unsigned int pos, const void *__restrict ptr, size_t total_bytes);
+size_t monitorFwrite(MonitorFile *file, unsigned int pos, int fd, const void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp);
 size_t fwrite(const void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp);
 
 long int monitorFtell(MonitorFile *file, unsigned int pos, int fd, FILE *fp);

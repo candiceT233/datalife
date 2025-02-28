@@ -47,14 +47,14 @@
 
 #define TRACKFILECHANGES 1
 
-std::vector<std::string> patterns = {
-    "*.fits", "*.vcf", "*.lht", "*.fna",
-    "*.*.bt2", "*.fastq", "*.fasta.amb", "*.fasta.sa", "*.fasta.bwt",
-    "*.fasta.pac", "*.fasta.ann", "*.fasta", "*.stf",
-    "*.out", "*.dot", "*.gz", "*.tar.gz", "*.dcd", "*.pt", "*.h5", "*.nc", 
-    "SAS", "EAS", "GBR", "AMR", "AFR", "EUR", "ALL",
-    //"*.txt", //"*.pdb",
-};
+    std::vector<std::string> patterns = {
+        "*.fits", "*.vcf", "*.lht", "*.fna",
+        "*.*.bt2", "*.fastq", "*.fasta.amb", "*.fasta.sa", "*.fasta.bwt",
+        "*.fasta.pac", "*.fasta.ann", "*.fasta", "*.stf",
+        "*.out", "*.dot", "*.gz", "*.tar.gz", "*.dcd", "*.pt", "*.h5", "*.nc", 
+        "*.txt","*.*.*.txt", //"*.pdb",
+        "SAS", "EAS", "GBR", "AMR", "AFR", "EUR", "ALL",
+    };
 
 static Timer* timer;
 
@@ -299,7 +299,7 @@ inline auto innerWrapper(const char *pathname, bool &isMonitorFile, Func monitor
         "*.*.bt2", "*.fastq", "*.fasta.amb", "*.fasta.sa", "*.fasta.bwt",
         "*.fasta.pac", "*.fasta.ann", "*.fasta", "*.stf",
         "*.out", "*.dot", "*.gz", "*.tar.gz", "*.dcd", "*.pt", "*.h5", "*.nc", 
-        //"*.txt", //"*.pdb",
+        "*.txt","*.*.*.txt", //"*.pdb",
         "SAS", "EAS", "GBR", "AMR", "AFR", "EUR", "ALL",
     };
 

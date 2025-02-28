@@ -169,8 +169,8 @@ void __attribute__((constructor)) monitorInit(void) {
 }
 
 void __attribute__((destructor)) monitorCleanup(void) {
-    // Removed the manual destructor call.
-    static CleanupTrackFile cleanup;
+    // // Removed the manual destructor call.
+    // static CleanupTrackFile cleanup;
 
     timer->start();
     init = false; //set to false because we can't ensure our static members have not already been deleted.

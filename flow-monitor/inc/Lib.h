@@ -52,7 +52,7 @@
         "*.*.bt2", "*.fastq", "*.fasta.amb", "*.fasta.sa", "*.fasta.bwt",
         "*.fasta.pac", "*.fasta.ann", "*.fasta", "*.stf",
         "*.out", "*.dot", "*.gz", "*.tar.gz", "*.dcd", "*.pt", "*.h5", "*.nc", 
-        "*.txt","*.*.*.txt", //"*.pdb",
+        //"*.txt","*.*.*.txt", //"*.pdb",
         "SAS", "EAS", "GBR", "AMR", "AFR", "EUR", "ALL",
     };
 

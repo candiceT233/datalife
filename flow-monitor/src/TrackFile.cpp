@@ -583,7 +583,7 @@ void TrackFile::close() {
 
     DPRINTF("Writing r blk access order stat with prefix %s\n", _filename.c_str());
     // std::string file_name_trace_r = _filename + "_" + pid + "_r_blk_trace";
-    std::string file_name_trace_r = _filename + "-" + pid + "-" + host_name + ".r_blk_trace.json";
+    std::string file_name_trace_r = _filename + "." + pid + "-" + host_name + ".r_blk_trace.json";
     // std::string file_name_trace_r = ".r_blk_trace.json-" + pid + "-" + host_name + "-" + _filename;
 
     auto& blk_trace_info_r = trace_read_blk_order[_filename];
@@ -591,7 +591,7 @@ void TrackFile::close() {
 
     DPRINTF("Writing w blk access order stat with prefix %s\n", _filename.c_str());
     // std::string file_name_trace_w = _filename + "_" + pid + "_w_blk_trace";
-    std::string file_name_trace_w = _filename + "-" + pid + "-" + host_name + ".w_blk_trace.json";
+    std::string file_name_trace_w = _filename + "." + pid + "-" + host_name + ".w_blk_trace.json";
 
     // std::string file_name_trace_w = ".w_blk_trace.json-" + pid + "-" + host_name + "-" + _filename;
     auto& blk_trace_info_w = trace_write_blk_order[_filename];

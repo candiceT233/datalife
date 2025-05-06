@@ -13,12 +13,14 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <fnmatch.h>
+#include <fnmatch.h>
 #include <unordered_map>
 #include <map>
 #include <atomic>
 #include <string>
 #include <vector>
 #include <unordered_set>
+#include <iostream>
 //#include "ErrorTester.h"
 //#include "InputFile.h"
 //#include "OutputFile.h"
@@ -39,22 +41,75 @@
 
 #define DPRINTF(...)
 // #ifdef LIBDEBUG
-// #define DPRINTF(...) fprintf(stderr, __VA_ARGS__)
+// #define DPRINTF(...) fDPRINTF(stderr, __VA_ARGS__)
 // #else
 // #define DPRINTF(...)
 // #endif
-// #define MYPRINTF(...) fprintf(stderr, __VA_ARGS__)
+// #define MYDPRINTF(...) fDPRINTF(stderr, __VA_ARGS__)
 
 #define TRACKFILECHANGES 1
 
-    std::vector<std::string> patterns = {
-        "*.fits", "*.vcf", "*.lht", "*.fna",
-        "*.*.bt2", "*.fastq", "*.fasta.amb", "*.fasta.sa", "*.fasta.bwt",
-        "*.fasta.pac", "*.fasta.ann", "*.fasta", "*.stf",
-        "*.out", "*.dot", "*.gz", "*.tar.gz", "*.dcd", "*.pt", "*.h5", "*.nc", 
-        //"*.txt","*.*.*.txt", //"*.pdb",
-        "SAS", "EAS", "GBR", "AMR", "AFR", "EUR", "ALL",
-    };
+    // std::vector<std::string> patterns = {
+    //     "*.fits", "*.vcf", "*.fna",
+    //     // "*.*.bt2", "*.fastq", "*.fasta.amb", "*.fasta.sa", "*.fasta.bwt",
+    //     // "*.fasta.pac", "*.fasta.ann", "*.fasta", 
+    //     // "*.out", "*.dot", 
+    //     "*.gz", "*.tar.gz", 
+    //     "*.dcd", "*.pt", "*.nc", 
+    //     //"*.txt","*.*.*.txt", //"*.pdb",
+    //     "SAS", "EAS", "GBR", "AMR", "AFR", "EUR", "ALL",
+        
+
+	// // "*.fits", "*.tbl", "1\-fit\..*", "*.hdr", "*.png"
+    //     // "*.h5", "*.npy", "*.npz",
+    //     // "*.lht","*.stf",
+    //     // "*.tbl", "*.hdr", "*.fits", "*.txt", "*.png"
+    //     // "*.stf", "*.lht", "*decon.out", "*.gz",
+    //     // "*.safetensors", "*.pt",
+    //     // "*.model",
+    //     // "*.pdf", 
+    //     // "*model.bin",
+    //     // "*.arrow", "*model.bin",
+    //     // "*merges.txt", 
+    //     // "*events.out.*", 
+    //     // "*config.json", 
+    //     // "*tokenizer.json", 
+    //     // "*vocab.json", 
+    //     // "*special_tokens_map.json", 
+    //     // "*tokenizer_config.json", 
+    //     // "*generation_config.json"
+
+    // };
+
+    /* Functions to parse input file extension strings*/
+// Helper function to trim whitespace from both ends of a string
+std::string trim(const std::string& str) {
+    const std::string whitespace = " \t\n\r";
+    const auto start = str.find_first_not_of(whitespace);
+    if (start == std::string::npos) return "";
+    const auto end = str.find_last_not_of(whitespace);
+    return str.substr(start, end - start + 1);
+}
+
+// Split function using stringstream
+std::vector<std::string> split_patterns(const std::string& input, char delimiter = ',') {
+    std::vector<std::string> patterns;
+    std::stringstream ss(input);
+    std::string token;
+
+    while (std::getline(ss, token, delimiter)) {
+        std::string trimmed = trim(token);
+        if (!trimmed.empty()) {
+            patterns.push_back(trimmed);
+        }
+    }
+    // Always include default pattern
+    patterns.push_back("*.datalifetest");
+    
+    return patterns;
+}
+
+std::vector<std::string> patterns = split_patterns(Config::passin_patterns);
 
 static Timer* timer;
 
@@ -163,7 +218,7 @@ inline bool checkMeta(const char *pathname, std::string &path, std::string &file
         char *meta = new char[bufferSize+1];
 
         int ret = (*unixread)(fd, (void *)meta, bufferSize);
-	// MYPRINTF("Will be calling close on file %s\n", pathname);
+	// MYDPRINTF("Will be calling close on file %s\n", pathname);
         (*unixclose)(fd);
         if (ret <= 0) {
             delete[] meta;
@@ -294,14 +349,7 @@ inline auto innerWrapper(const char *pathname, bool &isMonitorFile, Func monitor
     return posixFun(args...);
   }
 
-    std::vector<std::string> patterns = {
-        "*.fits", "*.vcf", "*.lht", "*.fna",
-        "*.*.bt2", "*.fastq", "*.fasta.amb", "*.fasta.sa", "*.fasta.bwt",
-        "*.fasta.pac", "*.fasta.ann", "*.fasta", "*.stf",
-        "*.out", "*.dot", "*.gz", "*.tar.gz", "*.dcd", "*.pt", "*.h5", "*.nc", 
-        "*.txt","*.*.*.txt", //"*.pdb",
-        "SAS", "EAS", "GBR", "AMR", "AFR", "EUR", "ALL",
-    };
+
 
   for (auto pattern: patterns) {
     auto ret_val = fnmatch(pattern.c_str(), pathname, 0);
@@ -350,9 +398,85 @@ inline void removeFromSet(std::unordered_set<FILE *> &set, FILE *value, unixfclo
         set.erase(value);
 }
 
+// template <typename FileId, typename Func, typename FuncPosix, typename... Args>
+// auto outerWrapper(const char *name, FileId fileId, Timer::Metric metric, Func monitorFun, FuncPosix posixFun, Args... args) {
+//     // std::cout << "Lib.h: Entering outerWrapper() for function: " << name << std::endl;
+
+//     // If initialization is not done, call the original POSIX function
+//     if (!init) {
+//         posixFun = (FuncPosix)dlsym(RTLD_NEXT, name);
+//         // std::cout << "Lib.h: outerWrapper() calling POSIX function directly for: " << name << std::endl;
+//         return posixFun(args...);
+//     }
+
+//     timer->start();
+
+//     // Check if this is a special file to track (from environment variable)
+//     bool track = trackFile(fileId);
+//     // std::cout << "Lib.h: trackFile(fileId) returned: " << track << " for " << name << std::endl;
+
+//     // Check for files internal to monitor
+//     bool ignore = ignoreFile(fileId);
+//     // std::cout << "Lib.h: ignoreFile(fileId) returned: " << ignore << " for " << name << std::endl;
+
+//     // Check if a monitor meta-file
+//     bool isMonitorFile = false;
+
+//     // Debug before calling innerWrapper
+//     // std::cout << "Lib.h: Calling innerWrapper() for: " << name << std::endl;
+//     auto retValue = innerWrapper(fileId, isMonitorFile, monitorFun, posixFun, args...);
+
+//     // Print return value from innerWrapper
+//     // std::cout << "Lib.h: innerWrapper() returned: " << retValue << " for " << name << std::endl;
+
+//     if (ignore) {
+//         // Maintain the ignore_fd set
+//         // std::cout << "Lib.h: Adding to ignore_fd set, retValue: " << retValue << " for " << name << std::endl;
+//         addToSet(ignore_fd, retValue, posixFun);
+//         removeFromSet(ignore_fd, retValue, posixFun);
+//         timer->end(Timer::MetricType::local, Timer::Metric::dummy); // Offset the call to start()
+//     }
+//     else { 
+//         // End Timers!
+//         if (track) {
+//             // Maintain the track_fd set
+//             // std::cout << "Lib.h: Adding to track_fd set, retValue: " << retValue << " for " << name << std::endl;
+//             addToSet(track_fd, retValue, posixFun);
+//             removeFromSet(track_fd, retValue, posixFun);
+
+//             if (std::string("read").compare(std::string(name)) == 0 ||
+//                 std::string("write").compare(std::string(name)) == 0) {
+//                 ssize_t ret = *reinterpret_cast<ssize_t*>(&retValue);
+//                 if (ret != -1) {
+//                     timer->addAmt(Timer::MetricType::local, metric, ret);
+//                 }
+//             }
+//             timer->end(Timer::MetricType::local, metric);
+//         }
+//         else if (isMonitorFile) {
+//             timer->end(Timer::MetricType::monitor, metric);
+//         }
+//         else {
+//             if (std::string("read").compare(std::string(name)) == 0 ||
+//                 std::string("write").compare(std::string(name)) == 0) {
+//                 ssize_t ret = *reinterpret_cast<ssize_t*>(&retValue);
+//                 if (ret != -1) {
+//                     timer->addAmt(Timer::MetricType::system, metric, ret);
+//                 }
+//             }
+//             timer->end(Timer::MetricType::system, metric);
+//         }
+//     }
+
+//     // Debug before returning final value
+//     // std::cout << "Lib.h: Returning from outerWrapper(), retValue: " << retValue << " for " << name << std::endl;
+//     return retValue;
+// }
+
+
 template <typename FileId, typename Func, typename FuncPosix, typename... Args>
 auto outerWrapper(const char *name, FileId fileId, Timer::Metric metric, Func monitorFun, FuncPosix posixFun, Args... args) {
-  // DPRINTF("command %s\n", name);
+    DPRINTF("Lib.h: outerWrapper() for function: %s\n", name);
 
   if (!init) {
       posixFun = (FuncPosix)dlsym(RTLD_NEXT, name);
@@ -371,6 +495,8 @@ auto outerWrapper(const char *name, FileId fileId, Timer::Metric metric, Func mo
     bool isMonitorFile = false;
 
     auto retValue = innerWrapper(fileId, isMonitorFile, monitorFun, posixFun, args...);
+    DPRINTF("Lib.h: outerWrapper() innerWrapper retValue: %d\n", retValue);
+
     if (ignore) {
         //Maintain the ignore_fd set
         addToSet(ignore_fd, retValue, posixFun);
@@ -379,6 +505,7 @@ auto outerWrapper(const char *name, FileId fileId, Timer::Metric metric, Func mo
     }
     else { //End Timers!
         if (track) {
+            DPRINTF("Lib.h: outerWrapper() track fd: %d (timmer local)\n", track_fd);
             //Maintain the track_fd set
             addToSet(track_fd, retValue, posixFun);
             removeFromSet(track_fd, retValue, posixFun);
@@ -392,9 +519,11 @@ auto outerWrapper(const char *name, FileId fileId, Timer::Metric metric, Func mo
             timer->end(Timer::MetricType::local, metric);
         }
         else if (isMonitorFile){
+            DPRINTF("Lib.h: outerWrapper() isMonitorFile fd: %d (timmer monitor)\n", track_fd);
             timer->end(Timer::MetricType::monitor, metric);
         }
         else{
+            DPRINTF("Lib.h: outerWrapper() !track && !isMonitorFile fd: %d (timmer system)\n", track_fd);
             if (std::string("read").compare(std::string(name)) == 0 ||
             std::string("write").compare(std::string(name)) == 0){
                 ssize_t ret = *reinterpret_cast<ssize_t*> (&retValue);
@@ -410,6 +539,7 @@ auto outerWrapper(const char *name, FileId fileId, Timer::Metric metric, Func mo
 
 /*Posix******************************************************************************************************/
 
+// int monitorOpen64(std::string name, std::string metaName, MonitorFile::Type type, const char *pathname, int flags, int mode);
 int monitorOpen(std::string name, std::string metaName, MonitorFile::Type type, const char *pathname, int flags, int mode);
 int open(const char *pathname, int flags, ...);
 int open64(const char *pathname, int flags, ...);

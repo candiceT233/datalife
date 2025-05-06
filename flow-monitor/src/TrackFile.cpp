@@ -40,6 +40,8 @@ using namespace std::chrono;
 #define DPRINTF(...)
 #endif
 
+
+
 #define BLK_SIZE 4096 // 4KB 8KB
 
 // #define GATHERSTAT 1
@@ -58,7 +60,8 @@ TrackFile::TrackFile(std::string name, int fd, bool openFile) :
   total_time_spent_write(0)
 
 { 
-  DPRINTF("In Trackfile constructor openfile bool: %d\n", openFile);
+  // DPRINTF("In Trackfile constructor openfile bool: %d\n", openFile);
+  // std::cout << "TrackFile.cpp: constructor openfile bool: " << openFile << std::endl;
   _blkSize = Config::blockSizeForStat;
   open();
   _active.store(true);
@@ -472,52 +475,6 @@ off_t TrackFile::seek(off_t offset, int whence, uint32_t index) {
   return  offset_loc; 
 }
 
-// void write_trace_data(const std::string& filename, TraceData& blk_trace_info, const std::string& pid) {
-//     // DPRINTF("write_trace_data(): writing to %s", filename.c_str());
-//     // Ensure dataLifeOutputPath is not empty
-//     if (Config::dataLifeOutputPath.empty()) {
-//       std::cerr << "Error: DATALIFE_OUTPUT_PATH is not set!" << std::endl;
-//       return;
-//     }
-//     // Construct the full file path
-//     std::string fullPath = Config::dataLifeOutputPath + "/" + filename;
-//     DPRINTF("write_trace_data(): writing to %s", fullPath.c_str());
-
-//     // // Ensure the output directory exists
-//     // std::filesystem::create_directories(Config::dataLifeOutputPath);
-
-//     if (blk_trace_info.empty()) {
-//       DPRINTF("write_trace_data(): blk_trace_info is empty");
-//       return;  // Do nothing if blk_trace_info is empty
-//     }
-
-//     // Create JSON object
-//     nlohmann::json jsonOutput;
-
-// #ifdef BLK_IDX
-//     jsonOutput["io_blk_range"] = blk_trace_info;
-// #else
-//     //TODO: modify the first index of blk_trace_info to first_access_block
-//     // Ensure blk_trace_info has at least one element before modifying
-//     if (!blk_trace_info.empty()) {
-//         blk_trace_info[0] = first_access_block;
-//     }
-//     jsonOutput["io_blk_range"] = blk_trace_info;
-// #endif
-
-//     // Clear the vector after creating JSON object
-//     blk_trace_info.clear();
-
-//     // Write the JSON object to the file
-//     std::ofstream file(fullPath, std::ios::out | std::ios::trunc); // Use trunc to overwrite the file
-//     if (!file) {
-//       std::cerr << "Error: Could not create file at " << fullPath << std::endl;
-//         return;
-//     }
-//     file << jsonOutput.dump(4); // Pretty print with an indent of 4 spaces
-//     DPRINTF("write_trace_data(): blk_trace_info written to file %s", fullPath.c_str());
-//     file.close();
-// }
 
 void write_trace_data(const std::string& filename, TraceData& blk_trace_info, const std::string& pid) {
   // Ensure dataLifeOutputPath is not empty

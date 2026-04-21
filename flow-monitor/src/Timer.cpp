@@ -60,7 +60,13 @@ Timer::Timer() {
         }
     }
 
-    stdoutcp = dup(1);
+    // Duplicate STDERR (fd 2), not STDOUT (fd 1), so end-of-run [MONITOR]
+    // stats don't contaminate the stdout stream of binaries whose output is
+    // parsed by an upstream process (e.g. Nextflow spawning `tty` and
+    // parsing its stdout as a TTY identifier). Stats are diagnostics; they
+    // belong on stderr. The variable name stays as `stdoutcp` to keep the
+    // commit small, but it now points at fd 2.
+    stdoutcp = dup(2);
     myprogname = __progname;
     _thread_timers = new std::unordered_map<std::thread::id, Timer::ThreadMetric*>;
 }

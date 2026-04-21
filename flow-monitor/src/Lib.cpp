@@ -79,6 +79,41 @@ public:
   }
 };
 
+// Static flag: true if current process's basename matches MONITOR_SKIP_BINARIES.
+// When set, monitorInit exits without installing dlsym hooks so fragile
+// subprocesses (JVM, conda's internal python) can run undisturbed while
+// their parent/sibling processes still trace normally.
+static bool monitorSkipActive = false;
+
+static bool checkMonitorSkip(void) {
+    const char* skipList = getenv("MONITOR_SKIP_BINARIES");
+    if (!skipList || !*skipList) return false;
+    char procExe[PATH_MAX];
+    ssize_t n = readlink("/proc/self/exe", procExe, sizeof(procExe) - 1);
+    if (n <= 0) return false;
+    procExe[n] = '\0';
+    // Extract basename
+    const char* slash = strrchr(procExe, '/');
+    const char* base = slash ? slash + 1 : procExe;
+    // Tokenize skipList on comma and compare basename exactly
+    std::string list(skipList);
+    size_t start = 0;
+    while (start <= list.size()) {
+        size_t comma = list.find(',', start);
+        size_t end = (comma == std::string::npos) ? list.size() : comma;
+        std::string token = list.substr(start, end - start);
+        // strip surrounding spaces
+        while (!token.empty() && token.front() == ' ') token.erase(0, 1);
+        while (!token.empty() && token.back() == ' ') token.pop_back();
+        if (!token.empty() && token == base) {
+            return true;
+        }
+        if (comma == std::string::npos) break;
+        start = comma + 1;
+    }
+    return false;
+}
+
 void __attribute__((constructor)) monitorInit(void) {
     // // std::cout << "Lip.cpp: " << "monitorInit(void)" << std::endl;
     DPRINTF("Lip.cpp: monitorInit(void)\n");
@@ -164,13 +199,27 @@ void __attribute__((constructor)) monitorInit(void) {
         //enable if running into issues with an application that launches child shells
         bool unsetLib = getenv("MONITOR_UNSET_LIB") ? atoi(getenv("MONITOR_UNSET_LIB")) : 0;
         if (unsetLib){
-            unsetenv("LD_PRELOAD"); 
+            unsetenv("LD_PRELOAD");
         }
 
         // std::cout << "Lib.cpp: monitorInit(void) end" << std::endl;
         timer->end(Timer::MetricType::monitor, Timer::Metric::constructor);
         //*InputFile::_time_of_last_read = std::chrono::high_resolution_clock::now();
     });
+    // AFTER dlsym pointers are set up by call_once, decide whether this
+    // process should skip tracking. The dlsym pointers (unixopen, ...) must
+    // be valid because libmonitor's strong symbols replace libc's in this
+    // process unconditionally; a null unix* pointer in a wrapper would
+    // segfault. The skip flag just prevents per-call trace bookkeeping;
+    // the wrappers pass through to real libc via the unix* pointers.
+    //
+    // LD_PRELOAD is intentionally NOT unset — children that are not
+    // blacklisted should still inherit and install libmonitor hooks.
+    if (checkMonitorSkip()) {
+        monitorSkipActive = true;
+        init = false;
+        return;
+    }
     init = true;
 }
 
@@ -181,6 +230,10 @@ void __attribute__((destructor)) monitorCleanup(void) {
 
     DPRINTF("Lip.cpp: monitorCleanup(void)\n");
     // std::cout << "Lib.cpp: monitorCleanup(void)." << std::endl;
+
+    // If this process was blacklisted via MONITOR_SKIP_BINARIES, init was
+    // skipped so there are no static members, no timer, no stats to flush.
+    if (monitorSkipActive) return;
 
     timer->start();
     init = false; //set to false because we can't ensure our static members have not already been deleted.
@@ -300,6 +353,9 @@ int open(const char *pathname, int flags, ...) {
     mode = va_arg(arg, int);
     va_end(arg);
 
+    // MONITOR_SKIP_BINARIES: pass through to libc without tracking
+    if (monitorSkipActive) { return unixopen(pathname, flags, mode); }
+
     Timer::Metric metric = (flags & O_WRONLY || flags & O_RDWR) ? Timer::Metric::out_open : Timer::Metric::in_open;
 
     // Check if the file matches any pattern
@@ -347,6 +403,8 @@ int open64(const char *pathname, int flags, ...) {
     va_start(arg, flags);
     mode = va_arg(arg, int);
     va_end(arg);
+
+    if (monitorSkipActive) { return unixopen64(pathname, flags, mode); }
 
     Timer::Metric metric = (flags & O_WRONLY || flags & O_RDWR) ? Timer::Metric::out_open : Timer::Metric::in_open;
 
@@ -414,8 +472,10 @@ int openat(int dirfd, const char *pathname, int flags, ...) {
   va_start(arg, flags);
   mode = va_arg(arg, int);
   va_end(arg);
-  
-  Timer::Metric metric = (flags & O_WRONLY || flags & O_RDWR) ? 
+
+  if (monitorSkipActive) { return unixopenat(dirfd, pathname, flags, mode); }
+
+  Timer::Metric metric = (flags & O_WRONLY || flags & O_RDWR) ?
     Timer::Metric::out_open : Timer::Metric::in_open;
 
   DPRINTF("Lib.cpp: Openat %s: \n", pathname);
@@ -452,6 +512,7 @@ int monitorClose(MonitorFile *file, unsigned int fp, int fd) {
 }
 
 int close(int fd) {
+    if (monitorSkipActive) { return unixclose(fd); }
     DPRINTF("Lib.cpp: Trying to close file with fd %d\n", fd);
     {
         std::lock_guard<std::mutex> lock(fdToFileMapMutex);
@@ -515,6 +576,7 @@ ssize_t monitorRead(MonitorFile *file, unsigned int fp, int fd, void *buf, size_
 }
 
 ssize_t read(int fd, void *buf, size_t count) {
+    if (monitorSkipActive) { return unixread(fd, buf, count); }
     vLock.readerLock();
     DPRINTF("Lib.cpp: Invoking read fd: %d count: %u\n", fd, count);
     auto ret = outerWrapper("read", fd, Timer::Metric::read, monitorRead, unixread, fd, buf, count);
@@ -533,6 +595,7 @@ ssize_t monitorWrite(MonitorFile *file, unsigned int fp, int fd, const void *buf
 }
 
 ssize_t write(int fd, const void *buf, size_t count) {
+    if (monitorSkipActive) { return unixwrite(fd, buf, count); }
     vLock.writerLock();
     DPRINTF("Lib.cpp: Invoking write fd: %d count: %u\n", fd, count);
     auto ret = outerWrapper("write", fd, Timer::Metric::write, monitorWrite, unixwrite, fd, buf, count);
@@ -546,6 +609,7 @@ T monitorLseek(MonitorFile *file, unsigned int fp, int fd, T offset, int whence)
 }
 
 off_t lseek(int fd, off_t offset, int whence) ADD_THROW {
+    if (monitorSkipActive) { return unixlseek(fd, offset, whence); }
     vLock.readerLock();
     auto ret = outerWrapper("lseek", fd, Timer::Metric::seek, monitorLseek<off_t>, unixlseek, fd, offset, whence);
     vLock.readerUnlock();
@@ -553,6 +617,7 @@ off_t lseek(int fd, off_t offset, int whence) ADD_THROW {
 }
 
 off64_t lseek64(int fd, off64_t offset, int whence) ADD_THROW {
+    if (monitorSkipActive) { return unixlseek64(fd, offset, whence); }
     vLock.readerLock();
     auto ret = outerWrapper("lseek64", fd, Timer::Metric::seek, monitorLseek<off64_t>, unixlseek64, fd, offset, whence);
     vLock.readerUnlock();
@@ -614,21 +679,25 @@ int monitorStat(std::string name, std::string metaName, MonitorFile::Type type, 
 }
 
 int __xstat(int version, const char *filename, struct stat *buf) ADD_THROW {
+    if (monitorSkipActive) { return unixxstat(version, filename, buf); }
     whichStat = unixxstat;
     return outerWrapper("__xstat", filename, Timer::Metric::stat, monitorStat<struct stat>, unixxstat, version, filename, buf);
 }
 
 int __xstat64(int version, const char *filename, struct stat64 *buf) ADD_THROW {
+    if (monitorSkipActive) { return unixxstat64(version, filename, buf); }
     whichStat64 = unixxstat64;
     return outerWrapper("__xstat64", filename, Timer::Metric::stat, monitorStat<struct stat64>, unixxstat64, version, filename, buf);
 }
 
 int __lxstat(int version, const char *filename, struct stat *buf) ADD_THROW {
+    if (monitorSkipActive) { return unixlxstat(version, filename, buf); }
     whichStat = unixxstat;
     return outerWrapper("__lxstat", filename, Timer::Metric::stat, monitorStat<struct stat>, unixlxstat, version, filename, buf);
 }
 
 int __lxstat64(int version, const char *filename, struct stat64 *buf) ADD_THROW {
+    if (monitorSkipActive) { return unixlxstat64(version, filename, buf); }
     whichStat64 = unixlxstat64;
     return outerWrapper("__lxstat64", filename, Timer::Metric::stat, monitorStat<struct stat64>, unixlxstat64, version, filename, buf);
 }
@@ -638,6 +707,7 @@ int monitorFsync(MonitorFile *file, unsigned int fp, int fd) {
 }
 
 int fsync(int fd) {
+    if (monitorSkipActive) { return unixfsync(fd); }
     vLock.readerLock();
     auto ret = outerWrapper("fsync", fd, Timer::Metric::stat, monitorFsync, unixfsync, fd);
     vLock.readerUnlock();
@@ -662,10 +732,12 @@ ssize_t monitorVector(const char *name, Timer::Metric metric, Func monitorFun, F
 }
 
 ssize_t readv(int fd, const struct iovec *iov, int iovcnt) {
+    if (monitorSkipActive) { return unixreadv(fd, iov, iovcnt); }
     return monitorVector("read", Timer::Metric::readv, monitorRead, unixread, fd, iov, iovcnt);
 }
 
 ssize_t writev(int fd, const struct iovec *iov, int iovcnt) {
+    if (monitorSkipActive) { return unixwritev(fd, iov, iovcnt); }
     return monitorVector("write", Timer::Metric::writev, monitorWrite, unixwrite, fd, iov, iovcnt);
 }
 
@@ -703,7 +775,8 @@ FILE *monitorFopen(std::string name, std::string metaName, MonitorFile::Type typ
 }
 
 FILE *fopen(const char *__restrict fileName, const char *__restrict modes) {
-  DPRINTF("Lib.cpp: Calling fopen on %s \n", fileName);  
+  if (monitorSkipActive) { return unixfopen(fileName, modes); }
+  DPRINTF("Lib.cpp: Calling fopen on %s \n", fileName);
   Timer::Metric metric = (modes[0] == 'r') ? Timer::Metric::in_fopen : Timer::Metric::out_fopen;
 
   for (auto pattern: patterns) {
@@ -719,7 +792,8 @@ FILE *fopen(const char *__restrict fileName, const char *__restrict modes) {
 }
 
 FILE *fopen64(const char *__restrict fileName, const char *__restrict modes) {
-  DPRINTF("Lib.cpp: Calling fopen64 on %s \n", fileName);  
+  if (monitorSkipActive) { return unixfopen64(fileName, modes); }
+  DPRINTF("Lib.cpp: Calling fopen64 on %s \n", fileName);
   Timer::Metric metric = (modes[0] == 'r') ? Timer::Metric::in_fopen : Timer::Metric::out_fopen;
 
   for (auto pattern: patterns) {
@@ -758,6 +832,7 @@ int monitorFclose(MonitorFile *file, unsigned int pos, int fd, FILE *fp) {
 }
 
 int fclose(FILE *fp) {
+    if (monitorSkipActive) { return unixfclose(fp); }
     DPRINTF("Lib.cpp: Invoking fclose \n");
     return outerWrapper("fclose", fp, Timer::Metric::close, monitorFclose, unixfclose, fp);
 }
@@ -774,8 +849,9 @@ size_t monitorFread(MonitorFile *file, unsigned int pos, int fd, void *__restric
 }
 
 size_t fread(void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp) {
+  if (monitorSkipActive) { return unixfread(ptr, size, n, fp); }
   DPRINTF("Lib.cpp: Invoking fread \n");
-  auto ret_val = outerWrapper("fread", fp, Timer::Metric::read, 
+  auto ret_val = outerWrapper("fread", fp, Timer::Metric::read,
 			      monitorFread, unixfread, ptr, size, n, fp);
   DPRINTF("Lib.cpp: fread return value %d\n", ret_val);
   return ret_val;
@@ -793,6 +869,7 @@ size_t monitorFwrite(MonitorFile *file, unsigned int pos, int fd, const void *__
 }
 
 size_t fwrite(const void *__restrict ptr, size_t size, size_t n, FILE *__restrict fp) {
+    if (monitorSkipActive) { return unixfwrite(ptr, size, n, fp); }
     DPRINTF("Lib.cpp: Invoking fwrite \n");
     return outerWrapper("fwrite", fp, Timer::Metric::write, monitorFwrite, unixfwrite, ptr, size, n, fp);
 }
@@ -806,8 +883,9 @@ int monitorVfprintf(MonitorFile *file, unsigned int pos, int fd, FILE * stream,
   return count;
 }
 int vfprintf(FILE * stream, const char * format, va_list arg ) {
+  if (monitorSkipActive) { return unix_vfprintf(stream, format, arg); }
   //DPRINTF("Lib.cpp: Invoking vfprintf\n");
-  return outerWrapper("vfprintf", stream, Timer::Metric::write, monitorVfprintf, 
+  return outerWrapper("vfprintf", stream, Timer::Metric::write, monitorVfprintf,
 		      unix_vfprintf, stream, format, arg);
 }
 
@@ -816,6 +894,7 @@ long int monitorFtell(MonitorFile *file, unsigned int pos, int fd, FILE *fp) {
 }
 
 long int ftell(FILE *fp) {
+    if (monitorSkipActive) { return unixftell(fp); }
     return outerWrapper("ftell", fp, Timer::Metric::ftell, monitorFtell, unixftell, fp);
 }
 
@@ -824,6 +903,7 @@ int monitorFseek(MonitorFile *file, unsigned int pos, int fd, FILE *fp, long int
 }
 
 int fseek(FILE *fp, long int off, int whence) {
+    if (monitorSkipActive) { return unixfseek(fp, off, whence); }
     return outerWrapper("fseek", fp, Timer::Metric::seek, monitorFseek, unixfseek, fp, off, whence);
 }
 
@@ -837,6 +917,7 @@ int monitorFgetc(MonitorFile *file, unsigned int pos, int fd, FILE *fp) {
 }
 
 int fgetc(FILE *fp) {
+    if (monitorSkipActive) { return unixfgetc(fp); }
     return outerWrapper("fgetc", fp, Timer::Metric::fgetc, monitorFgetc, unixfgetc, fp);
 }
 
@@ -866,6 +947,7 @@ char *monitorFgets(MonitorFile *file, unsigned int pos, int fd, char *__restrict
 }
 
 char *fgets(char *__restrict s, int n, FILE *__restrict fp) {
+    if (monitorSkipActive) { return unixfgets(s, n, fp); }
     return outerWrapper("fgets", fp, Timer::Metric::fgets, monitorFgets, unixfgets, s, n, fp);
 }
 
@@ -875,6 +957,7 @@ int monitorFputc(MonitorFile *file, unsigned int pos, int fd, int c, FILE *fp) {
 }
 
 int fputc(int c, FILE *fp) {
+    if (monitorSkipActive) { return unixfputc(c, fp); }
     return outerWrapper("fputc", fp, Timer::Metric::fputc, monitorFputc, unixfputc, c, fp);
 }
 
@@ -896,6 +979,7 @@ int monitorFputs(MonitorFile *file, unsigned int pos, int fd, const char *__rest
 }
 
 int fputs(const char *__restrict s, FILE *__restrict fp) {
+    if (monitorSkipActive) { return unixfputs(s, fp); }
     return outerWrapper("fputs", fp, Timer::Metric::fputs, monitorFputs, unixfputs, s, fp);
 }
 
@@ -904,6 +988,7 @@ int monitorFeof(MonitorFile *file, unsigned int pos, int fd, FILE *fp) {
 }
 
 int feof(FILE *fp) ADD_THROW {
+    if (monitorSkipActive) { return unixfeof(fp); }
     return outerWrapper("feof", fp, Timer::Metric::feof, monitorFeof, unixfeof, fp);
 }
 
@@ -941,6 +1026,7 @@ ssize_t monitorMmapWrite(MonitorFile *file, void *addr, size_t length, off_t off
 
 void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
     if (!unixmmap) unixmmap = (mmap_t)dlsym(RTLD_NEXT, "mmap");
+    if (monitorSkipActive) { return unixmmap(addr, length, prot, flags, fd, offset); }
 
     DPRINTF("Lib.cpp: Intercepting mmap: addr=%p, length=%zu, prot=%d, flags=%d, fd=%d, offset=%ld\n",
             addr, length, prot, flags, fd, offset);
@@ -988,6 +1074,7 @@ ssize_t monitorPread(MonitorFile *file, unsigned int pos, int fd, void *buf, siz
 }
 
 ssize_t pread(int fd, void *buf, size_t count, off_t offset) {
+    if (monitorSkipActive) { return unixpread(fd, buf, count, offset); }
     DPRINTF("Lib.cpp: Invoking pread: fd=%d, count=%zu, offset=%lld\n", fd, count, (long long)offset);
 
     auto ret = outerWrapper("pread", fd, Timer::Metric::read, monitorPread, unixpread, fd, buf, count, offset);
@@ -1005,6 +1092,7 @@ ssize_t monitorPwrite(MonitorFile *file, unsigned int pos, int fd, const void *b
 }
 
 ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset) {
+    if (monitorSkipActive) { return unixpwrite(fd, buf, count, offset); }
     DPRINTF("Lib.cpp: Invoking pwrite: fd=%d, count=%zu, offset=%ld\n", fd, count, offset);
 
     auto ret = outerWrapper("pwrite", fd, Timer::Metric::write,
@@ -1025,6 +1113,7 @@ ssize_t monitorPread64(MonitorFile *file, unsigned int pos, int fd, void *buf, s
 }
 
 ssize_t pread64(int fd, void *buf, size_t count, off64_t offset) {
+    if (monitorSkipActive) { return unixpread64(fd, buf, count, offset); }
     DPRINTF("Lib.cpp: Invoking pread64: fd=%d, count=%zu, offset=%lld\n", fd, count, (long long)offset);
     auto ret = outerWrapper("pread64", fd, Timer::Metric::read, monitorPread64, unixpread64, fd, buf, count, offset);
     return ret;
@@ -1042,9 +1131,10 @@ ssize_t monitorPwrite64(MonitorFile *file, unsigned int pos, int fd, const void 
 }
 
 ssize_t pwrite64(int fd, const void *buf, size_t count, off64_t offset) {
-    DPRINTF("Lib.cpp: Invoking pwrite64: fd=%d, count=%zu, offset=%ld\n", 
+    if (monitorSkipActive) { return unixpwrite64(fd, buf, count, offset); }
+    DPRINTF("Lib.cpp: Invoking pwrite64: fd=%d, count=%zu, offset=%ld\n",
         fd, count, offset);
-    auto ret = outerWrapper("pwrite64", fd, Timer::Metric::write, 
+    auto ret = outerWrapper("pwrite64", fd, Timer::Metric::write,
                             monitorPwrite64, unixpwrite64, fd, buf, count, offset);
     return ret;
 }

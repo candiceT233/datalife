@@ -1,5 +1,6 @@
 #ifndef CONFIG_H
 #define CONFIG_H
+#include <cstdint>
 #include <string>
 
 namespace Config {

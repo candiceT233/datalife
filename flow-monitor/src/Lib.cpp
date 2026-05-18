@@ -85,36 +85,10 @@ void __attribute__((constructor)) monitorInit(void) {
     // std::cout << "Lib.cpp: monitorInit(void) start" << std::endl;
 
     std::call_once(log_flag, []() {
-        timer = new Timer();
-
-        timer->start();
-        Loggable::mtx_cout = new std::mutex();
-        //InputFile::_time_of_last_read = new std::chrono::time_point<std::chrono::high_resolution_clock>();
-        //InputFile::_cache = new Cache(BASECACHENAME, CacheType::base);
-        //InputFile::_transferPool = new PriorityThreadPool<std::packaged_task<std::shared_future<Request *>()>>(1,"infile tx pool") ;
-        //InputFile::_decompressionPool = new PriorityThreadPool<std::packaged_task<Request*()>>(Config::numClientDecompThreads,"infile comp pool");
-        //OutputFile::_transferPool = new PriorityThreadPool<std::function<void()>>(1,"outfile tx pool");
-        //OutputFile::_decompressionPool = new ThreadPool<std::function<void()>>(Config::numClientDecompThreads,"outfile comp pool");
-
-        //LocalFile::_cache = new Cache(BASECACHENAME, CacheType::base);
-        ConnectionPool::useCnt = new std::unordered_map<std::string, uint64_t>();
-        ConnectionPool::consecCnt = new std::unordered_map<std::string, uint64_t>();
-        ConnectionPool::stats = new std::unordered_map<std::string, std::pair<double, double>>();
-
-        track_files = new std::unordered_set<std::string>();
-        char *temp = getenv("MONITOR_LOCAL_FILES");
-        if (temp) {
-            std::stringstream files(temp);
-            while (!files.eof()) {
-                std::string f;
-                getline(files, f, ' ');
-                DPRINTF("Lib.cpp: %s\n",f.c_str());
-                track_files->insert(f);
-            }
-        }
-        
-        curlInit;
-
+        // Step 1: Resolve all libc symbols first. These must be valid even on
+        // the monitor_disabled path below, because (a) outerWrapper's !init
+        // fallthrough does its own dlsym but (b) a few interposers like
+        // exit()/_exit()/_Exit()/exit_group() call the unix* pointers directly.
         unixopen = (unixopen_t)dlsym(RTLD_NEXT, "open");
         unixopen64 = (unixopen_t)dlsym(RTLD_NEXT, "open64");
         unixopenat = (unixopenat_t)dlsym(RTLD_NEXT, "openat");
@@ -161,6 +135,80 @@ void __attribute__((constructor)) monitorInit(void) {
         unixpread64 = (pread64_t)dlsym(RTLD_NEXT, "pread64");
         unixpwrite64 = (pwrite64_t)dlsym(RTLD_NEXT, "pwrite64");
 
+        // Step 2: argv-based wrapper-helper skip.
+        //
+        // The basenames below are POSIX coreutils that exist solely to read
+        // /proc or shuffle pipes between other processes. Nextflow's
+        // nxf_tree / nxf_pstat post-exec helper forks dozens of them inside
+        // every task's container; in slim images (Seqera Wave's
+        // coreutils_*_pruned, hash 838ba80435a629f8) the interleaved
+        // libmonitor constructor + destructor across all those short-lived
+        // forks deadlocks the wrapper, hanging the task until Nextflow's
+        // --max_time SIGTERMs it. Skipping these helpers avoids the hang.
+        //
+        // Coverage parity: Darshan already excludes /proc, /sys, /dev, /etc,
+        // /usr, /var, /tmp from its instrumentation by default (verified via
+        // strings on libdarshan.so: darshan_core_name_is_excluded). The I/O
+        // these helpers would have produced is either inside that default
+        // skip list or is pipe traffic that neither profiler treats as real
+        // workflow data. Net DataLife capture is >= net Darshan capture for
+        // the same workflow.
+        //
+        // List is intentionally short and conservative; a workflow binary
+        // genuinely named one of these will also be skipped (known false
+        // positive class). See widget-v1 docs/DATALIFE_INTEGRATION.md for
+        // the full rationale.
+        static const char *wrapper_helper_basenames[] = {
+            "ps", "grep", "awk", "sed", "head", "tail", "cat",
+            "ls", "wc", "cut", "sort", "uniq", "tr", "expr", "date", NULL
+        };
+        char exe[PATH_MAX];
+        ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+        if (n > 0) {
+            exe[n] = '\0';
+            const char *base = strrchr(exe, '/');
+            base = base ? base + 1 : exe;
+            for (int i = 0; wrapper_helper_basenames[i]; i++) {
+                if (strcmp(base, wrapper_helper_basenames[i]) == 0) {
+                    monitor_disabled = true;
+                    // Leave init=false so outerWrapper's existing !init path
+                    // takes over and calls libc directly for every interposed
+                    // call in this process.
+                    return;
+                }
+            }
+        }
+
+        // Step 3: Full init for non-skipped processes.
+        timer = new Timer();
+        timer->start();
+        Loggable::mtx_cout = new std::mutex();
+        //InputFile::_time_of_last_read = new std::chrono::time_point<std::chrono::high_resolution_clock>();
+        //InputFile::_cache = new Cache(BASECACHENAME, CacheType::base);
+        //InputFile::_transferPool = new PriorityThreadPool<std::packaged_task<std::shared_future<Request *>()>>(1,"infile tx pool") ;
+        //InputFile::_decompressionPool = new PriorityThreadPool<std::packaged_task<Request*()>>(Config::numClientDecompThreads,"infile comp pool");
+        //OutputFile::_transferPool = new PriorityThreadPool<std::function<void()>>(1,"outfile tx pool");
+        //OutputFile::_decompressionPool = new ThreadPool<std::function<void()>>(Config::numClientDecompThreads,"outfile comp pool");
+
+        //LocalFile::_cache = new Cache(BASECACHENAME, CacheType::base);
+        ConnectionPool::useCnt = new std::unordered_map<std::string, uint64_t>();
+        ConnectionPool::consecCnt = new std::unordered_map<std::string, uint64_t>();
+        ConnectionPool::stats = new std::unordered_map<std::string, std::pair<double, double>>();
+
+        track_files = new std::unordered_set<std::string>();
+        char *temp = getenv("MONITOR_LOCAL_FILES");
+        if (temp) {
+            std::stringstream files(temp);
+            while (!files.eof()) {
+                std::string f;
+                getline(files, f, ' ');
+                DPRINTF("Lib.cpp: %s\n",f.c_str());
+                track_files->insert(f);
+            }
+        }
+
+        curlInit;
+
         //enable if running into issues with an application that launches child shells
         bool unsetLib = getenv("MONITOR_UNSET_LIB") ? atoi(getenv("MONITOR_UNSET_LIB")) : 0;
         if (unsetLib){
@@ -170,7 +218,9 @@ void __attribute__((constructor)) monitorInit(void) {
         timer->end(Timer::MetricType::monitor, Timer::Metric::constructor);
         //*InputFile::_time_of_last_read = std::chrono::high_resolution_clock::now();
     });
-    init = true;
+    if (!monitor_disabled) {
+        init = true;
+    }
 }
 
 void __attribute__((destructor)) monitorCleanup(void) {
@@ -178,6 +228,13 @@ void __attribute__((destructor)) monitorCleanup(void) {
     // static CleanupTrackFile cleanup;
 
     DPRINTF("Lib.cpp: monitorCleanup(void)\n");
+
+    // If we never fully initialized (the wrapper-helper skip in monitorInit
+    // bailed early), every heap object below is uninitialized and the
+    // [MONITOR] Exiting Client / curlEnd / ConnectionPool teardown would
+    // SEGV or worse, deadlock under the per-fork race that motivated the
+    // skip in the first place. Early return is the whole point of Option C.
+    if (monitor_disabled) return;
 
     timer->start();
     init = false; //set to false because we can't ensure our static members have not already been deleted.

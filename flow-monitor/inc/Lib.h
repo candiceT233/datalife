@@ -90,6 +90,13 @@ static Timer* timer;
 
 std::once_flag log_flag;
 bool init = false;
+// Set true in monitorInit() if argv[0]'s basename matches a wrapper-helper
+// (ps, grep, awk, ...). When true, init stays false so outerWrapper falls
+// through to RTLD_NEXT and the destructor early-returns, avoiding the
+// per-fork init/destroy deadlock observed in Nextflow's nxf_tree wrapper
+// inside Seqera Wave's pruned coreutils containers. See widget-v1
+// docs/DATALIFE_INTEGRATION.md for the parity argument vs. Darshan.
+bool monitor_disabled = false;
 ReaderWriterLock vLock;
 
 std::unordered_set<std::string>* track_files = NULL; //this is a pointer cause we access in ((attribute)) constructor and initialization isnt guaranteed

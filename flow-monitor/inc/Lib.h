@@ -325,10 +325,23 @@ inline auto innerWrapper(const char *pathname, bool &isMonitorFile, Func monitor
   std::string path;
   std::string file;
   MonitorFile::Type type;
-  
+
   std::string test_tty(pathname);
   if(test_tty.find("tty") != std::string::npos) {
     return posixFun(args...);
+  }
+
+  // 2026-05-19: don't instrument files inside DATALIFE_OUTPUT_PATH itself.
+  // Otherwise a permissive DATALIFE_FILE_PATTERNS (e.g. "config*") matches
+  // libmonitor's own previously-written trace files, instruments them,
+  // writes new traces named like "<original>_<pid>_w_stat", which match the
+  // same pattern, instrument again — exponential filename growth.
+  if (!Config::dataLifeOutputPath.empty()) {
+    std::string test_pathname(pathname);
+    if (test_pathname.compare(0, Config::dataLifeOutputPath.size(),
+                              Config::dataLifeOutputPath) == 0) {
+      return posixFun(args...);
+    }
   }
 
   for (auto pattern: patterns) {

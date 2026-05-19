@@ -160,7 +160,14 @@ void __attribute__((constructor)) monitorInit(void) {
         // the full rationale.
         static const char *wrapper_helper_basenames[] = {
             "ps", "grep", "awk", "sed", "head", "tail", "cat",
-            "ls", "wc", "cut", "sort", "uniq", "tr", "expr", "date", NULL
+            "ls", "wc", "cut", "sort", "uniq", "tr", "expr", "date",
+            // 2026-05-19: tty/stty/tput corrupt Nextflow's tty parse with
+            // "[MONITOR] tty" on stdout — Nextflow's driver tries to read
+            // the tty subprocess output as a tty path, hits a NumberFormat
+            // parse error, and aborts at startup. Adding these to the
+            // skip list keeps the driver clean.
+            "tty", "stty", "tput",
+            NULL
         };
         char exe[PATH_MAX];
         ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);

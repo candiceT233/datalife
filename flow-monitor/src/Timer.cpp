@@ -60,7 +60,14 @@ Timer::Timer() {
         }
     }
 
-    stdoutcp = dup(1);
+    // 2026-05-19: dup stderr (fd 2), not stdout. The destructor's [MONITOR]
+    // banner + per-metric timer dump is written to this fd. Writing to stdout
+    // pollutes any captured-stdout parent process — e.g. Nextflow runs
+    // `python -c '...some_yaml_dump...'` as a child, parses its stdout as
+    // YAML, and chokes on the [MONITOR] preamble with "while scanning a
+    // simple key" → workflow aborts at startup. stderr is interleaved but
+    // not parsed by Nextflow. Variable name stdoutcp kept for diff size.
+    stdoutcp = dup(2);
     myprogname = __progname;
     _thread_timers = new std::unordered_map<std::thread::id, Timer::ThreadMetric*>;
 }

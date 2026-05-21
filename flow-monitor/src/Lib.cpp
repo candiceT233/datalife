@@ -249,6 +249,15 @@ void __attribute__((destructor)) monitorCleanup(void) {
     curlEnd(Config::curlOnStartup);
     curlDestroy;
 
+    // Lighter-weight teardown (mirrors why Darshan survives nf-core): if this
+    // process recorded NO monitored I/O — e.g. a perl/python/shell helper that
+    // opened no pattern-matching file — skip the heavy teardown + per-process
+    // JSON write. Otherwise libmonitor's destructor piles up across nf-core
+    // tasks' thousands of short-lived subprocesses and deadlocks them at exit.
+    if (timer && !timer->hadMonitoredIO()) {
+        return;
+    }
+
     if (Config::printStats) {
         std::cerr << "[MONITOR] " << "Exiting Client" << std::endl;
         if (ConnectionPool::useCnt->size() > 0) {

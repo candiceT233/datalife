@@ -61,6 +61,12 @@ class Timer {
     static char *printTime();
     static int64_t getTimestamp();
 
+    // True if this process recorded any monitored (tracked) file I/O op
+    // (in_open..rewind). Used to skip heavy destructor teardown for processes
+    // that touched no pattern-matching file — avoids the destructor pile-up
+    // that deadlocks nf-core tasks' many short-lived subprocesses at exit.
+    bool hadMonitoredIO();
+
   private:
     void addThread(std::thread::id id);
     class ThreadMetric {

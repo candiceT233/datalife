@@ -72,6 +72,24 @@ Timer::Timer() {
     _thread_timers = new std::unordered_map<std::thread::id, Timer::ThreadMetric*>;
 }
 
+bool Timer::hadMonitoredIO() {
+    // Real I/O ops are in_open(0)..rewind(22); constructor/destructor/dummy are
+    // bookkeeping and always nonzero, so they're excluded.
+    for (int j = Timer::Metric::in_open; j <= Timer::Metric::rewind; j++) {
+        if (_cnt[Timer::MetricType::monitor][j] > 0) return true;
+    }
+    if (_thread_timers) {
+        for (auto &kv : *_thread_timers) {
+            if (!kv.second) continue;
+            for (int j = Timer::Metric::in_open; j <= Timer::Metric::rewind; j++) {
+                auto *c = kv.second->cnt[Timer::MetricType::monitor][j];
+                if (c && c->load(std::memory_order_relaxed) > 0) return true;
+            }
+        }
+    }
+    return false;
+}
+
 Timer::~Timer() {
 
 #ifdef TIMER_JSON
